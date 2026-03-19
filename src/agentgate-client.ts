@@ -10,7 +10,7 @@ import path from "node:path";
 // Ed25519 signing helpers (matches AgentGate's signing protocol)
 // ---------------------------------------------------------------------------
 
-function toBase64Url(buffer: Buffer): string {
+export function toBase64Url(buffer: Buffer): string {
   return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
@@ -18,11 +18,11 @@ function base64UrlToBase64(value: string): string {
   return Buffer.from(value, "base64url").toString("base64");
 }
 
-function buildSignedMessage(nonce: string, method: string, apiPath: string, timestamp: string, body: unknown): Buffer {
+export function buildSignedMessage(nonce: string, method: string, apiPath: string, timestamp: string, body: unknown): Buffer {
   return createHash("sha256").update(`${nonce}${method}${apiPath}${timestamp}${JSON.stringify(body)}`).digest();
 }
 
-function signRequest(
+export function signRequest(
   publicKeyBase64: string,
   privateKeyBase64: string,
   nonce: string,

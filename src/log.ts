@@ -18,6 +18,6 @@ export class AttackLog {
   }
 
   getResults(): AttackResult[] {
-    return this.results;
+    return [...this.results];
   }
 }

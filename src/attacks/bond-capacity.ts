@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { AttackResult } from "../log";
 import { signRequest } from "../agentgate-client";
-import type { AttackScenario, AttackClient } from "./replay";
+import type { AttackScenario, AttackClient, AttackParams } from "./replay";
 
 const CATEGORY = "Bond Capacity";
 
@@ -46,11 +46,14 @@ async function signedPost(
 // Attack 2.1: Over-commit exposure
 // ---------------------------------------------------------------------------
 
-async function attack2_1(client: AttackClient): Promise<AttackResult> {
-  // Lock a 100-cent bond
+async function attack2_1(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
+  const bondAmountCents = (typeof params?.bond_amount_cents === "number" ? params.bond_amount_cents : 100);
+  const exposureCents = (typeof params?.exposure_cents === "number" ? params.exposure_cents : 100);
+
+  // Lock a bond
   const bondResult = await signedPost(client, "/v1/bonds/lock", {
     identityId: client.identityId,
-    amountCents: 100,
+    amountCents: bondAmountCents,
     currency: "USD",
     ttlSeconds: 300,
     reason: "bond-capacity-test-2.1",
@@ -70,14 +73,13 @@ async function attack2_1(client: AttackClient): Promise<AttackResult> {
 
   const bondId = bondResult.data.bondId as string;
 
-  // Try to execute with exposure_cents = 100. The 1.2x multiplier makes
-  // effective exposure = ceil(100 * 1.2) = 120, which exceeds the 100-cent bond.
+  // Try to execute with exposure that exceeds bond capacity after 1.2x multiplier
   const actionResult = await signedPost(client, "/v1/actions/execute", {
     identityId: client.identityId,
     bondId,
     actionType: "bond-capacity-test",
     payload: { test: "2.1" },
-    exposure_cents: 100,
+    exposure_cents: exposureCents,
   });
 
   const caught = actionResult.status >= 400;
@@ -85,12 +87,12 @@ async function attack2_1(client: AttackClient): Promise<AttackResult> {
     scenarioId: "2.1",
     scenarioName: "Over-commit exposure",
     category: CATEGORY,
-    expectedOutcome: "Rejected with INSUFFICIENT_BOND_CAPACITY",
+    expectedOutcome: `Rejected with INSUFFICIENT_BOND_CAPACITY (exposure=${exposureCents} on ${bondAmountCents}-cent bond)`,
     actualOutcome: `${actionResult.status} ${JSON.stringify(actionResult.data)}`,
     caught,
     details: caught
       ? `AgentGate rejected the over-committed exposure (${actionResult.status}).`
-      : `AgentGate accepted exposure_cents=100 on a 100-cent bond — the 1.2x capacity multiplier may not be enforced.`,
+      : `AgentGate accepted exposure_cents=${exposureCents} on a ${bondAmountCents}-cent bond — the 1.2x capacity multiplier may not be enforced.`,
   };
 }
 
@@ -98,7 +100,8 @@ async function attack2_1(client: AttackClient): Promise<AttackResult> {
 // Attack 2.2: Double-resolve
 // ---------------------------------------------------------------------------
 
-async function attack2_2(client: AttackClient): Promise<AttackResult> {
+async function attack2_2(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
+  const secondOutcome = (typeof params?.second_outcome === "string" ? params.second_outcome as "success" | "failed" : "failed");
   // Lock a bond
   const bondResult = await signedPost(client, "/v1/bonds/lock", {
     identityId: client.identityId,
@@ -165,7 +168,7 @@ async function attack2_2(client: AttackClient): Promise<AttackResult> {
 
   // Second resolve — should be rejected
   const secondResolve = await signedPost(client, `/v1/actions/${actionId}/resolve`, {
-    outcome: "failed",
+    outcome: secondOutcome,
   });
 
   const caught = secondResolve.status >= 400;
@@ -186,13 +189,16 @@ async function attack2_2(client: AttackClient): Promise<AttackResult> {
 // Attack 2.3: Act on expired bond
 // ---------------------------------------------------------------------------
 
-async function attack2_3(client: AttackClient): Promise<AttackResult> {
-  // Lock a bond with a very short TTL (5 seconds)
+async function attack2_3(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
+  const ttlSeconds = (typeof params?.ttl_seconds === "number" ? params.ttl_seconds : 5);
+  const waitMs = (typeof params?.wait_ms === "number" ? params.wait_ms : (ttlSeconds + 2) * 1000);
+
+  // Lock a bond with a short TTL
   const bondResult = await signedPost(client, "/v1/bonds/lock", {
     identityId: client.identityId,
     amountCents: 100,
     currency: "USD",
-    ttlSeconds: 5,
+    ttlSeconds,
     reason: "bond-capacity-test-2.3",
   });
 
@@ -211,7 +217,7 @@ async function attack2_3(client: AttackClient): Promise<AttackResult> {
   const bondId = bondResult.data.bondId as string;
 
   // Wait for the bond to expire
-  await new Promise((resolve) => setTimeout(resolve, 7000));
+  await new Promise((resolve) => setTimeout(resolve, waitMs));
 
   // Try to execute against the expired bond
   const exposureCents = Math.floor(100 / 1.2);
@@ -228,12 +234,12 @@ async function attack2_3(client: AttackClient): Promise<AttackResult> {
     scenarioId: "2.3",
     scenarioName: "Act on expired bond",
     category: CATEGORY,
-    expectedOutcome: "Rejected — bond has expired after 5s TTL",
+    expectedOutcome: `Rejected — bond has expired after ${ttlSeconds}s TTL`,
     actualOutcome: `${actionResult.status} ${JSON.stringify(actionResult.data)}`,
     caught,
     details: caught
       ? `AgentGate rejected the action on an expired bond (${actionResult.status}).`
-      : `AgentGate accepted an action on a bond that expired ${7} seconds ago — TTL enforcement may be missing.`,
+      : `AgentGate accepted an action on a bond that expired ${Math.round(waitMs / 1000)}s ago — TTL enforcement may be missing.`,
   };
 }
 
@@ -248,7 +254,7 @@ export const bondCapacityAttacks: AttackScenario[] = [
     category: CATEGORY,
     description: "Execute an action with exposure exceeding bond capacity (1.2x multiplier)",
     expectedOutcome: "rejected with INSUFFICIENT_BOND_CAPACITY",
-    execute: attack2_1,
+    execute: (client, params?) => attack2_1(client, params),
   },
   {
     id: "2.2",
@@ -256,7 +262,7 @@ export const bondCapacityAttacks: AttackScenario[] = [
     category: CATEGORY,
     description: "Resolve an already-resolved action a second time",
     expectedOutcome: "rejected — action already resolved",
-    execute: attack2_2,
+    execute: (client, params?) => attack2_2(client, params),
   },
   {
     id: "2.3",
@@ -264,6 +270,6 @@ export const bondCapacityAttacks: AttackScenario[] = [
     category: CATEGORY,
     description: "Execute an action against a bond after its TTL has expired",
     expectedOutcome: "rejected — bond expired",
-    execute: attack2_3,
+    execute: (client, params?) => attack2_3(client, params),
   },
 ];

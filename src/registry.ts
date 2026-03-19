@@ -8,6 +8,7 @@ import { signatureAttacks } from "./attacks/signature";
 import { authorizationAttacks } from "./attacks/authorization";
 import { inputValidationAttacks } from "./attacks/input-validation";
 import { rateLimitAttacks } from "./attacks/rate-limit";
+import { timingAttacks } from "./attacks/timing";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -354,6 +355,37 @@ register({
   defenseTargeted: "Rate limit bucket cleanup",
   difficultyTier: "medium",
   execute: rateLimitAttacks[2].execute,
+});
+
+// Category 7: Timing & Race Conditions
+register({
+  id: "7.1",
+  name: "Resolve just before sweeper auto-slashes",
+  category: "Timing & Race Conditions",
+  description: "Race the sweeper — resolve an action just before bond TTL expires",
+  defenseTargeted: "Resolution vs sweeper race condition",
+  difficultyTier: "high",
+  execute: timingAttacks[0].execute,
+});
+
+register({
+  id: "7.2",
+  name: "Parallel resolve attempts",
+  category: "Timing & Race Conditions",
+  description: "Fire multiple simultaneous resolve requests on the same action",
+  defenseTargeted: "WHERE status='open' atomicity",
+  difficultyTier: "high",
+  execute: timingAttacks[1].execute,
+});
+
+register({
+  id: "7.3",
+  name: "Rapid identity creation (Sybil flood)",
+  category: "Timing & Race Conditions",
+  description: "Create many identities in rapid succession to test for rate limiting",
+  defenseTargeted: "Identity creation rate limiting",
+  difficultyTier: "high",
+  execute: timingAttacks[2].execute,
 });
 
 // ---------------------------------------------------------------------------

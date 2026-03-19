@@ -2,8 +2,20 @@
   "name": "agent-004-red-team",
   "version": "0.0.1",
   "description": "A bonded red team simulator that attacks live AgentGate infrastructure and reports findings",
-  "scripts": {},
+  "scripts": {
+    "test": "vitest run",
+    "start": "tsx src/cli.ts"
+  },
   "keywords": [],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "dotenv": "^17.3.1"
+  }
 }

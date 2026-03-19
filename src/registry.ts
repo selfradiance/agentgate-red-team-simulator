@@ -9,6 +9,7 @@ import { authorizationAttacks } from "./attacks/authorization";
 import { inputValidationAttacks } from "./attacks/input-validation";
 import { rateLimitAttacks } from "./attacks/rate-limit";
 import { timingAttacks } from "./attacks/timing";
+import { protocolAttacks } from "./attacks/protocol";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -386,6 +387,27 @@ register({
   defenseTargeted: "Identity creation rate limiting",
   difficultyTier: "high",
   execute: timingAttacks[2].execute,
+});
+
+// Category 8: Protocol Abuse
+register({
+  id: "8.1",
+  name: "Malformed request shape",
+  category: "Protocol Abuse",
+  description: "GET to POST-only endpoint, or POST with absent body",
+  defenseTargeted: "HTTP method and body validation",
+  difficultyTier: "low",
+  execute: protocolAttacks[0].execute,
+});
+
+register({
+  id: "8.2",
+  name: "Wrong Content-Type",
+  category: "Protocol Abuse",
+  description: "Valid JSON body with Content-Type: text/plain or application/xml",
+  defenseTargeted: "Content-Type validation",
+  difficultyTier: "low",
+  execute: protocolAttacks[1].execute,
 });
 
 // ---------------------------------------------------------------------------

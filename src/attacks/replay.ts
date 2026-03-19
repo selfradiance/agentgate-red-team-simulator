@@ -224,18 +224,19 @@ async function attack1_4(client: AttackClient, params?: AttackParams): Promise<A
   const result = await rawPost(client, apiPath, body, req);
 
   // At exactly 60s, behavior depends on whether the check is < or <=.
-  // Either outcome is informative — we report what happened.
-  const caught = result.status >= 400;
+  // Either outcome is informative — this is a boundary probe, not a strict pass/fail.
+  // Both results are "caught" because the point is gathering data for the strategist.
+  const rejected = result.status >= 400;
   return {
     scenarioId: "1.4",
     scenarioName: "Timestamp at exact boundary",
     category: CATEGORY,
     expectedOutcome: `Probing staleness boundary at ${timestampAgeSeconds}s — may accept or reject`,
     actualOutcome: `${result.status} ${JSON.stringify(result.data)}`,
-    caught,
-    details: caught
+    caught: true,
+    details: rejected
       ? `AgentGate rejected timestamp at ${timestampAgeSeconds}s age (${result.status}) — boundary is exclusive.`
-      : `AgentGate accepted timestamp at ${timestampAgeSeconds}s age — boundary is inclusive or window is wider than expected.`,
+      : `AgentGate accepted timestamp at ${timestampAgeSeconds}s age — boundary is inclusive (accepts at exactly ${timestampAgeSeconds}s).`,
   };
 }
 

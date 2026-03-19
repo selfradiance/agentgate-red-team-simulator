@@ -122,6 +122,46 @@ register({
   execute: bondCapacityAttacks[2].execute,
 });
 
+register({
+  id: "2.4",
+  name: "Zero-amount bond",
+  category: "Bond Capacity",
+  description: "Lock a bond with amountCents = 0",
+  defenseTargeted: "Zod + CHECK constraint on amount_cents",
+  difficultyTier: "medium",
+  execute: bondCapacityAttacks[3].execute,
+});
+
+register({
+  id: "2.5",
+  name: "Exhaust bond via 1.2x multiplier rounding",
+  category: "Bond Capacity",
+  description: "Probe the exact boundary of the 1.2x capacity rule (83 vs 84 cents on 100-cent bond)",
+  defenseTargeted: "Capacity rounding boundary",
+  difficultyTier: "high",
+  execute: bondCapacityAttacks[4].execute,
+});
+
+register({
+  id: "2.6",
+  name: "Multi-action bond exhaustion",
+  category: "Bond Capacity",
+  description: "Execute action A at near-max exposure, then try action B with the same exposure",
+  defenseTargeted: "Multi-action capacity accounting",
+  difficultyTier: "high",
+  execute: bondCapacityAttacks[5].execute,
+});
+
+register({
+  id: "2.7",
+  name: "Resolve then re-execute on released bond",
+  category: "Bond Capacity",
+  description: "Execute, resolve as success (releasing bond), then try to execute again on the same bond",
+  defenseTargeted: "Bond lifecycle state machine",
+  difficultyTier: "high",
+  execute: bondCapacityAttacks[6].execute,
+});
+
 // Category 3: Signature Tampering
 register({
   id: "3.1",

@@ -295,6 +295,36 @@ register({
   execute: inputValidationAttacks[2].execute,
 });
 
+register({
+  id: "5.4",
+  name: "Type coercion — string where number expected",
+  category: "Input Validation",
+  description: "Send a string like 'abc' where amountCents (number) is expected",
+  defenseTargeted: "Zod type coercion handling",
+  difficultyTier: "high",
+  execute: inputValidationAttacks[3].execute,
+});
+
+register({
+  id: "5.5",
+  name: "String fields at max-length boundary",
+  category: "Input Validation",
+  description: "Send actionType at 128/129 chars to probe max-length enforcement",
+  defenseTargeted: "Zod max-length validation",
+  difficultyTier: "medium",
+  execute: inputValidationAttacks[4].execute,
+});
+
+register({
+  id: "5.6",
+  name: "Payload at 4096-byte boundary with multi-byte UTF-8",
+  category: "Input Validation",
+  description: "Payload of emoji chars near 4096 bytes — tests Buffer.byteLength vs char count",
+  defenseTargeted: "Payload byte-length validation with multi-byte chars",
+  difficultyTier: "high",
+  execute: inputValidationAttacks[5].execute,
+});
+
 // Category 6: Rate Limiting
 register({
   id: "6.1",

@@ -193,6 +193,26 @@ register({
   execute: signatureAttacks[2].execute,
 });
 
+register({
+  id: "3.4",
+  name: "Valid signature for different endpoint",
+  category: "Signature Tampering",
+  description: "Sign a request for /v1/bonds/lock but send it to /v1/actions/execute",
+  defenseTargeted: "Path bound into signed message",
+  difficultyTier: "high",
+  execute: signatureAttacks[3].execute,
+});
+
+register({
+  id: "3.5",
+  name: "Header canonicalization abuse",
+  category: "Signature Tampering",
+  description: "Duplicate x-signature headers, whitespace-padded values, or mixed-case header names",
+  defenseTargeted: "Header parsing robustness",
+  difficultyTier: "medium",
+  execute: signatureAttacks[4].execute,
+});
+
 // Category 4: Authorization Boundaries
 register({
   id: "4.1",

@@ -234,6 +234,36 @@ register({
   execute: authorizationAttacks[1].execute,
 });
 
+register({
+  id: "4.3",
+  name: "Execute on another identity's bond",
+  category: "Authorization Boundaries",
+  description: "Identity B tries to execute an action on a bond locked by identity A",
+  defenseTargeted: "Bond-to-identity binding",
+  difficultyTier: "high",
+  execute: authorizationAttacks[2].execute,
+});
+
+register({
+  id: "4.4",
+  name: "Register duplicate public key",
+  category: "Authorization Boundaries",
+  description: "Register a new identity using a public key that's already registered",
+  defenseTargeted: "UNIQUE constraint on public key",
+  difficultyTier: "medium",
+  execute: authorizationAttacks[3].execute,
+});
+
+register({
+  id: "4.5",
+  name: "Trigger auto-ban then try to act",
+  category: "Authorization Boundaries",
+  description: "Accumulate malicious resolutions to trigger auto-ban, then try to lock a bond",
+  defenseTargeted: "Auto-ban after 3 malicious resolutions",
+  difficultyTier: "high",
+  execute: authorizationAttacks[4].execute,
+});
+
 // Category 5: Input Validation
 register({
   id: "5.1",

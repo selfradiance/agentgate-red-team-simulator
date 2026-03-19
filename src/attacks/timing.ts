@@ -57,9 +57,31 @@ async function attack7_1(client: AttackClient, params?: AttackParams): Promise<A
   const ttlSeconds = (typeof params?.ttl_seconds === "number" ? params.ttl_seconds : 5);
   const resolveAtSeconds = (typeof params?.resolve_at_seconds === "number" ? params.resolve_at_seconds : ttlSeconds - 1);
 
-  // Lock a bond with short TTL
-  const bondResult = await signedPostClient(client, "/v1/bonds/lock", {
-    identityId: client.identityId,
+  // Create a fresh identity to avoid rate-limit interference
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicJwk = publicKey.export({ format: "jwk" });
+  const privateJwk = privateKey.export({ format: "jwk" });
+  const freshPub = Buffer.from(publicJwk.x!, "base64url").toString("base64");
+  const freshPriv = Buffer.from(privateJwk.d!, "base64url").toString("base64");
+
+  const idResult = await signedPost(client.agentGateUrl, client.apiKey, freshPub, freshPriv, "/v1/identities", { publicKey: freshPub });
+  if (idResult.status >= 300) {
+    return {
+      scenarioId: "7.1",
+      scenarioName: "Resolve just before sweeper auto-slashes",
+      category: CATEGORY,
+      expectedOutcome: `Resolve at ${resolveAtSeconds}s on ${ttlSeconds}s TTL bond`,
+      actualOutcome: `Identity creation failed: ${idResult.status} ${JSON.stringify(idResult.data)}`,
+      caught: false,
+      details: "Could not complete test — fresh identity creation did not succeed.",
+    };
+  }
+
+  const freshId = idResult.data.identityId as string;
+
+  // Lock a bond with short TTL using fresh identity
+  const bondResult = await signedPost(client.agentGateUrl, client.apiKey, freshPub, freshPriv, "/v1/bonds/lock", {
+    identityId: freshId,
     amountCents: 100,
     currency: "USD",
     ttlSeconds,
@@ -81,9 +103,9 @@ async function attack7_1(client: AttackClient, params?: AttackParams): Promise<A
   const bondId = bondResult.data.bondId as string;
   const exposureCents = Math.floor(100 / 1.2);
 
-  // Execute an action
-  const actionResult = await signedPostClient(client, "/v1/actions/execute", {
-    identityId: client.identityId,
+  // Execute an action using fresh identity
+  const actionResult = await signedPost(client.agentGateUrl, client.apiKey, freshPub, freshPriv, "/v1/actions/execute", {
+    identityId: freshId,
     bondId,
     actionType: "timing-test",
     payload: { test: "7.1" },
@@ -107,8 +129,8 @@ async function attack7_1(client: AttackClient, params?: AttackParams): Promise<A
   // Wait until just before TTL expiry
   await new Promise((resolve) => setTimeout(resolve, resolveAtSeconds * 1000));
 
-  // Try to resolve — racing the sweeper
-  const resolveResult = await signedPostClient(client, `/v1/actions/${actionId}/resolve`, {
+  // Try to resolve — racing the sweeper, using fresh identity
+  const resolveResult = await signedPost(client.agentGateUrl, client.apiKey, freshPub, freshPriv, `/v1/actions/${actionId}/resolve`, {
     outcome: "success",
   });
 

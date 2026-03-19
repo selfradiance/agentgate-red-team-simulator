@@ -1,6 +1,6 @@
 // Bond capacity attack scenarios — tests whether AgentGate enforces bond limits correctly
 
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import type { AttackResult } from "../log";
 import { signRequest } from "../agentgate-client";
 import type { AttackScenario, AttackClient, AttackParams } from "./replay";
@@ -40,6 +40,31 @@ async function signedPost(
   }
 
   return { status: response.status, data };
+}
+
+// Helper — create a fresh identity to avoid rate-limit interference
+async function createFreshClient(client: AttackClient): Promise<AttackClient> {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicJwk = publicKey.export({ format: "jwk" });
+  const privateJwk = privateKey.export({ format: "jwk" });
+  const pub = Buffer.from(publicJwk.x!, "base64url").toString("base64");
+  const priv = Buffer.from(privateJwk.d!, "base64url").toString("base64");
+
+  const result = await signedPost(
+    { ...client, keys: { publicKey: pub, privateKey: priv }, identityId: "" },
+    "/v1/identities",
+    { publicKey: pub },
+  );
+  if (result.status >= 300) {
+    throw new Error(`Failed to create fresh identity: ${result.status} ${JSON.stringify(result.data)}`);
+  }
+
+  return {
+    agentGateUrl: client.agentGateUrl,
+    apiKey: client.apiKey,
+    keys: { publicKey: pub, privateKey: priv },
+    identityId: result.data.identityId as string,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -333,9 +358,12 @@ async function attack2_6(client: AttackClient, params?: AttackParams): Promise<A
   const actionCount = (typeof params?.action_count === "number" ? params.action_count : 2);
   const bondAmountCents = (typeof params?.bond_amount_cents === "number" ? params.bond_amount_cents : 100);
 
+  // Use a fresh identity to avoid rate-limit interference
+  const fresh = await createFreshClient(client);
+
   // Lock a bond
-  const bondResult = await signedPost(client, "/v1/bonds/lock", {
-    identityId: client.identityId,
+  const bondResult = await signedPost(fresh, "/v1/bonds/lock", {
+    identityId: fresh.identityId,
     amountCents: bondAmountCents,
     currency: "USD",
     ttlSeconds: 300,
@@ -358,8 +386,8 @@ async function attack2_6(client: AttackClient, params?: AttackParams): Promise<A
 
   // Execute first action at near-max capacity: floor(bondAmount / 1.2) uses most of the bond
   const firstExposure = Math.floor(bondAmountCents / 1.2);
-  const firstAction = await signedPost(client, "/v1/actions/execute", {
-    identityId: client.identityId,
+  const firstAction = await signedPost(fresh, "/v1/actions/execute", {
+    identityId: fresh.identityId,
     bondId,
     actionType: "bond-capacity-test",
     payload: { test: "2.6", action: 1 },
@@ -381,8 +409,8 @@ async function attack2_6(client: AttackClient, params?: AttackParams): Promise<A
   // Try remaining actions — should be rejected because first action consumed nearly all capacity
   const remainingResults: { status: number; data: Record<string, unknown> }[] = [];
   for (let i = 1; i < actionCount; i++) {
-    const result = await signedPost(client, "/v1/actions/execute", {
-      identityId: client.identityId,
+    const result = await signedPost(fresh, "/v1/actions/execute", {
+      identityId: fresh.identityId,
       bondId,
       actionType: "bond-capacity-test",
       payload: { test: "2.6", action: i + 1 },
@@ -413,9 +441,12 @@ async function attack2_6(client: AttackClient, params?: AttackParams): Promise<A
 // ---------------------------------------------------------------------------
 
 async function attack2_7(client: AttackClient, _params?: AttackParams): Promise<AttackResult> {
+  // Use a fresh identity to avoid rate-limit interference
+  const fresh = await createFreshClient(client);
+
   // Lock a bond, execute, resolve as success (bond released), then try to execute again
-  const bondResult = await signedPost(client, "/v1/bonds/lock", {
-    identityId: client.identityId,
+  const bondResult = await signedPost(fresh, "/v1/bonds/lock", {
+    identityId: fresh.identityId,
     amountCents: 100,
     currency: "USD",
     ttlSeconds: 300,
@@ -438,8 +469,8 @@ async function attack2_7(client: AttackClient, _params?: AttackParams): Promise<
   const exposureCents = Math.floor(100 / 1.2);
 
   // Execute first action
-  const actionResult = await signedPost(client, "/v1/actions/execute", {
-    identityId: client.identityId,
+  const actionResult = await signedPost(fresh, "/v1/actions/execute", {
+    identityId: fresh.identityId,
     bondId,
     actionType: "bond-capacity-test",
     payload: { test: "2.7", phase: "first" },
@@ -461,7 +492,7 @@ async function attack2_7(client: AttackClient, _params?: AttackParams): Promise<
   const actionId = actionResult.data.actionId as string;
 
   // Resolve as success — this releases the bond
-  const resolveResult = await signedPost(client, `/v1/actions/${actionId}/resolve`, {
+  const resolveResult = await signedPost(fresh, `/v1/actions/${actionId}/resolve`, {
     outcome: "success",
   });
 
@@ -478,8 +509,8 @@ async function attack2_7(client: AttackClient, _params?: AttackParams): Promise<
   }
 
   // Try to execute again on the now-released bond
-  const reExecuteResult = await signedPost(client, "/v1/actions/execute", {
-    identityId: client.identityId,
+  const reExecuteResult = await signedPost(fresh, "/v1/actions/execute", {
+    identityId: fresh.identityId,
     bondId,
     actionType: "bond-capacity-test",
     payload: { test: "2.7", phase: "re-execute" },

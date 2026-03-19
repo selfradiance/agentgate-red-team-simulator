@@ -125,13 +125,18 @@ async function attack4_1(client: AttackClient, params?: AttackParams): Promise<A
 
 async function attack4_2(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
   const crossAction = (typeof params?.cross_action === "string" ? params.cross_action as "resolve" | "execute" : "resolve");
-  // Identity A is the client's identity — lock a bond and execute an action
+
+  // Create a fresh identity A (victim) to avoid rate-limit interference
+  const keysA = freshKeypair();
+  const identityAId = await registerIdentity(client.agentGateUrl, client.apiKey, keysA.publicKey, keysA.privateKey);
+
+  // Identity A locks a bond and executes an action
   const bondResult = await signedPost(
     client.agentGateUrl, client.apiKey,
-    client.keys.publicKey, client.keys.privateKey,
+    keysA.publicKey, keysA.privateKey,
     "/v1/bonds/lock",
     {
-      identityId: client.identityId,
+      identityId: identityAId,
       amountCents: 100,
       currency: "USD",
       ttlSeconds: 300,
@@ -156,10 +161,10 @@ async function attack4_2(client: AttackClient, params?: AttackParams): Promise<A
 
   const actionResult = await signedPost(
     client.agentGateUrl, client.apiKey,
-    client.keys.publicKey, client.keys.privateKey,
+    keysA.publicKey, keysA.privateKey,
     "/v1/actions/execute",
     {
-      identityId: client.identityId,
+      identityId: identityAId,
       bondId,
       actionType: "auth-test",
       payload: { test: "4.2" },
@@ -181,14 +186,10 @@ async function attack4_2(client: AttackClient, params?: AttackParams): Promise<A
 
   const actionId = actionResult.data.actionId as string;
 
-  // Create identity B — completely separate keypair
-  const keysB = freshKeypair();
-  await registerIdentity(client.agentGateUrl, client.apiKey, keysB.publicKey, keysB.privateKey);
-
-  // Identity B tries to act on identity A's action
+  // Identity B (the original client) tries to resolve identity A's action
   const crossResult = await signedPost(
     client.agentGateUrl, client.apiKey,
-    keysB.publicKey, keysB.privateKey,
+    client.keys.publicKey, client.keys.privateKey,
     `/v1/actions/${actionId}/resolve`,
     { outcome: "failed" },
   );

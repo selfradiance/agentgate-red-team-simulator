@@ -10,6 +10,7 @@ import { inputValidationAttacks } from "./attacks/input-validation";
 import { rateLimitAttacks } from "./attacks/rate-limit";
 import { timingAttacks } from "./attacks/timing";
 import { protocolAttacks } from "./attacks/protocol";
+import { mcpAttacks } from "./attacks/mcp";
 
 const allScenarios: AttackScenario[] = [
   ...replayAttacks,
@@ -20,6 +21,7 @@ const allScenarios: AttackScenario[] = [
   ...rateLimitAttacks,
   ...timingAttacks,
   ...protocolAttacks,
+  ...mcpAttacks,
 ];
 
 export async function runAttacks(client: AttackClient): Promise<AttackLog> {

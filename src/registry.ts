@@ -10,6 +10,7 @@ import { inputValidationAttacks } from "./attacks/input-validation";
 import { rateLimitAttacks } from "./attacks/rate-limit";
 import { timingAttacks } from "./attacks/timing";
 import { protocolAttacks } from "./attacks/protocol";
+import { mcpAttacks } from "./attacks/mcp";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -408,6 +409,37 @@ register({
   defenseTargeted: "Content-Type validation",
   difficultyTier: "low",
   execute: protocolAttacks[1].execute,
+});
+
+// Category 9: MCP Transport Abuse
+register({
+  id: "9.1",
+  name: "MCP without auth key",
+  category: "MCP Transport Abuse",
+  description: "Hit /mcp on port 3001 without x-agentgate-key header",
+  defenseTargeted: "MCP auth key requirement",
+  difficultyTier: "medium",
+  execute: mcpAttacks[0].execute,
+});
+
+register({
+  id: "9.2",
+  name: "MCP session exhaustion",
+  category: "MCP Transport Abuse",
+  description: "Open 100+ concurrent MCP sessions to test session cap enforcement",
+  defenseTargeted: "100-session cap",
+  difficultyTier: "high",
+  execute: mcpAttacks[1].execute,
+});
+
+register({
+  id: "9.3",
+  name: "MCP malformed/oversized request",
+  category: "MCP Transport Abuse",
+  description: "Send oversized (>1MB), invalid method, or malformed payloads to MCP",
+  defenseTargeted: "MCP body size limit and payload validation",
+  difficultyTier: "medium",
+  execute: mcpAttacks[2].execute,
 });
 
 // ---------------------------------------------------------------------------

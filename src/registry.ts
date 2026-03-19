@@ -12,6 +12,7 @@ import { timingAttacks } from "./attacks/timing";
 import { protocolAttacks } from "./attacks/protocol";
 import { mcpAttacks } from "./attacks/mcp";
 import { marketAttacks } from "./attacks/market";
+import { economicAttacks } from "./attacks/economic";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -482,6 +483,37 @@ register({
   defenseTargeted: "Market position input validation",
   difficultyTier: "medium",
   execute: marketAttacks[3].execute,
+});
+
+// Category 11: Economic & Reputation
+register({
+  id: "11.1",
+  name: "Reputation pumping",
+  category: "Economic & Reputation",
+  description: "Pump reputation with cheap successes, then attempt high-value action",
+  defenseTargeted: "Reputation-weighted bond limits",
+  difficultyTier: "high",
+  execute: economicAttacks[0].execute,
+});
+
+register({
+  id: "11.2",
+  name: "Sybil campaign chain",
+  category: "Economic & Reputation",
+  description: "Create many identities, distribute execute pressure across all to bypass rate limits",
+  defenseTargeted: "Cross-identity aggregate limiting",
+  difficultyTier: "high",
+  execute: economicAttacks[1].execute,
+});
+
+register({
+  id: "11.3",
+  name: "Resource exhaustion via long-TTL open actions",
+  category: "Economic & Reputation",
+  description: "Create identities, lock bonds, execute actions, never resolve — clog dashboard and DB",
+  defenseTargeted: "Resource exhaustion protection",
+  difficultyTier: "medium",
+  execute: economicAttacks[2].execute,
 });
 
 // ---------------------------------------------------------------------------

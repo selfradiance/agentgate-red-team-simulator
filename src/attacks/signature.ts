@@ -3,7 +3,7 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import type { AttackResult } from "../log";
 import { signRequest } from "../agentgate-client";
-import type { AttackScenario, AttackClient } from "./replay";
+import type { AttackScenario, AttackClient, AttackParams } from "./replay";
 
 const CATEGORY = "Signature Tampering";
 
@@ -11,8 +11,9 @@ const CATEGORY = "Signature Tampering";
 // Attack 3.1: Wrong private key
 // ---------------------------------------------------------------------------
 
-async function attack3_1(client: AttackClient): Promise<AttackResult> {
-  const apiPath = "/v1/bonds/lock";
+async function attack3_1(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
+  const targetEndpoint = (typeof params?.target_endpoint === "string" ? params.target_endpoint : "/v1/bonds/lock");
+  const apiPath = targetEndpoint;
   const body = {
     identityId: client.identityId,
     amountCents: 100,
@@ -70,7 +71,8 @@ async function attack3_1(client: AttackClient): Promise<AttackResult> {
 // Attack 3.2: Malformed signature
 // ---------------------------------------------------------------------------
 
-async function attack3_2(client: AttackClient): Promise<AttackResult> {
+async function attack3_2(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
+  const signatureValue = (typeof params?.signature_value === "string" ? params.signature_value : "not-a-real-signature-lol");
   const apiPath = "/v1/bonds/lock";
   const body = {
     identityId: client.identityId,
@@ -90,7 +92,7 @@ async function attack3_2(client: AttackClient): Promise<AttackResult> {
       "x-nonce": nonce,
       "x-agentgate-key": client.apiKey,
       "x-agentgate-timestamp": timestamp,
-      "x-agentgate-signature": "not-a-real-signature-lol",
+      "x-agentgate-signature": signatureValue,
     },
     body: JSON.stringify(body),
   });
@@ -120,7 +122,9 @@ async function attack3_2(client: AttackClient): Promise<AttackResult> {
 // Attack 3.3: Missing signature headers
 // ---------------------------------------------------------------------------
 
-async function attack3_3(client: AttackClient): Promise<AttackResult> {
+async function attack3_3(client: AttackClient, params?: AttackParams): Promise<AttackResult> {
+  // omit_headers: which headers to leave out. Default: all three (signature, timestamp, nonce).
+  const omitHeaders = (Array.isArray(params?.omit_headers) ? params.omit_headers as string[] : ["signature", "timestamp", "nonce"]);
   const apiPath = "/v1/bonds/lock";
   const body = {
     identityId: client.identityId,
@@ -130,13 +134,22 @@ async function attack3_3(client: AttackClient): Promise<AttackResult> {
     reason: "signature-test-3.3",
   };
 
-  // Send with NO signature, timestamp, or nonce headers
+  const nonce = randomUUID();
+  const timestamp = Date.now().toString();
+  const signature = signRequest(client.keys.publicKey, client.keys.privateKey, nonce, "POST", apiPath, timestamp, body);
+
+  // Build headers, selectively omitting the ones specified
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-agentgate-key": client.apiKey,
+  };
+  if (!omitHeaders.includes("nonce")) headers["x-nonce"] = nonce;
+  if (!omitHeaders.includes("timestamp")) headers["x-agentgate-timestamp"] = timestamp;
+  if (!omitHeaders.includes("signature")) headers["x-agentgate-signature"] = signature;
+
   const response = await fetch(new URL(apiPath, client.agentGateUrl), {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-agentgate-key": client.apiKey,
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -152,12 +165,12 @@ async function attack3_3(client: AttackClient): Promise<AttackResult> {
     scenarioId: "3.3",
     scenarioName: "Missing signature headers",
     category: CATEGORY,
-    expectedOutcome: "Rejected — missing x-agentgate-signature, x-agentgate-timestamp, x-nonce",
+    expectedOutcome: `Rejected — missing headers: ${omitHeaders.join(", ")}`,
     actualOutcome: `${response.status} ${JSON.stringify(data)}`,
     caught,
     details: caught
-      ? `AgentGate rejected the request with missing headers (${response.status}).`
-      : `AgentGate accepted a request with no signature headers — header validation may be missing.`,
+      ? `AgentGate rejected the request with missing ${omitHeaders.join(", ")} header(s) (${response.status}).`
+      : `AgentGate accepted a request missing ${omitHeaders.join(", ")} header(s) — header validation may be missing.`,
   };
 }
 
@@ -172,7 +185,7 @@ export const signatureAttacks: AttackScenario[] = [
     category: CATEGORY,
     description: "Sign a request with a different keypair than the registered identity",
     expectedOutcome: "rejected — signature mismatch",
-    execute: attack3_1,
+    execute: (client, params?) => attack3_1(client, params),
   },
   {
     id: "3.2",
@@ -180,7 +193,7 @@ export const signatureAttacks: AttackScenario[] = [
     category: CATEGORY,
     description: "Send a request with a garbage signature string",
     expectedOutcome: "rejected — invalid signature format",
-    execute: attack3_2,
+    execute: (client, params?) => attack3_2(client, params),
   },
   {
     id: "3.3",
@@ -188,6 +201,6 @@ export const signatureAttacks: AttackScenario[] = [
     category: CATEGORY,
     description: "Send a request with no signature, timestamp, or nonce headers",
     expectedOutcome: "rejected — missing required headers",
-    execute: attack3_3,
+    execute: (client, params?) => attack3_3(client, params),
   },
 ];

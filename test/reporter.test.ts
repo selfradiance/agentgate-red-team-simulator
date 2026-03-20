@@ -2,7 +2,7 @@
 
 import "dotenv/config";
 import { describe, it, expect } from "vitest";
-import { generateReport, type RecursiveRoundData } from "../src/reporter";
+import { generateReport, type RecursiveRoundData, type TeamRoundData } from "../src/reporter";
 import type { AttackResult } from "../src/log";
 import type { StrategyResponse } from "../src/strategist";
 
@@ -80,6 +80,59 @@ const fakeRecursiveData: RecursiveRoundData[] = [
   },
 ];
 
+const fakeTeamData: TeamRoundData[] = [
+  {
+    roundNumber: 1,
+    perPersonaResults: new Map([
+      ["shadow", [fakeResults[0]]],
+      ["whale", [fakeResults[1]]],
+      ["chaos", []],
+    ]),
+    coordinatedOpResults: [
+      {
+        op: {
+          type: "handoff",
+          personas: ["shadow", "whale"],
+          attackRefs: ["1.1", "2.1"],
+          targetDefense: "Per-identity rate limiting",
+          expectedSignal: "Enforcement inconsistency under cross-identity load",
+          whyMultiIdentity: "Rate limit is per-identity — need two identities",
+        },
+        results: [fakeResults[0], fakeResults[1]],
+        intel: "Rate limit triggers at 10 per 60s",
+      },
+    ],
+    hypotheses: [
+      {
+        id: "novel-t1",
+        description: "Test cross-identity bond capacity aggregation",
+        targetDefense: "Bond capacity isolation",
+        rationale: "Per-identity capacity might leak across identities",
+        confidence: "medium",
+        targetPersona: "whale",
+      },
+    ],
+    generationOutcomes: [
+      {
+        success: true,
+        attack: {
+          hypothesis: {
+            id: "novel-t1",
+            description: "Test cross-identity bond capacity aggregation",
+            targetDefense: "Bond capacity isolation",
+            rationale: "Per-identity capacity might leak",
+            confidence: "medium",
+            targetPersona: "whale",
+          },
+          code: 'async function novelAttack(toolkit) { return { caught: true, reason: "isolated" }; }',
+          validationResult: { valid: true },
+        },
+      },
+    ],
+    novelResults: [fakeNovelResult],
+  },
+];
+
 describe("reporter", () => {
   it("throws if ANTHROPIC_API_KEY is missing", async () => {
     const saved = process.env.ANTHROPIC_API_KEY;
@@ -112,6 +165,18 @@ describe("reporter", () => {
       process.env.ANTHROPIC_API_KEY = saved;
     }
   });
+
+  it("throws if ANTHROPIC_API_KEY is missing with team data", async () => {
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      await expect(
+        generateReport([...fakeResults, fakeNovelResult], undefined, undefined, fakeTeamData),
+      ).rejects.toThrow("ANTHROPIC_API_KEY not set");
+    } finally {
+      process.env.ANTHROPIC_API_KEY = saved;
+    }
+  });
 });
 
 describe.skipIf(!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes("your-"))(
@@ -139,6 +204,18 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.
       );
       expect(report).toBeTruthy();
       expect(report.length).toBeGreaterThan(50);
+      expect(report).toContain("AgentGate");
+    });
+
+    it("generates a report with team data", { timeout: 30000 }, async () => {
+      const report = await generateReport(
+        [...fakeResults, fakeNovelResult],
+        undefined,
+        undefined,
+        fakeTeamData,
+      );
+      expect(report).toBeTruthy();
+      expect(report.length).toBeGreaterThan(100);
       expect(report).toContain("AgentGate");
     });
   },

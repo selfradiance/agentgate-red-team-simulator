@@ -1,6 +1,6 @@
 {
   "name": "agent-004-red-team",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A bonded red team simulator that attacks live AgentGate infrastructure and reports findings",
   "scripts": {
     "test": "vitest run",

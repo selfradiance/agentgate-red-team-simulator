@@ -1,14 +1,15 @@
 # Agent 004: Red Team Simulator
 
-An adaptive and recursive red team agent that attacks live AgentGate infrastructure, logs results, and generates a findings report. In recursive mode, Claude reasons about why attacks were caught, generates novel JavaScript attack functions, and executes them in a sandboxed child process. Built on the bond-and-slash accountability model — the attacker posts collateral too.
+An adaptive, recursive, and coordinated red team agent that attacks live AgentGate infrastructure with three specialist personas. Claude picks attacks, reasons about defense gaps, generates novel JavaScript attack code in a sandbox, and coordinates multi-identity pressure testing. Built on the bond-and-slash accountability model — the attacker posts collateral too.
 
 ## What This Does
 
-Agent 004 runs 48 attack scenarios across 12 categories against a live AgentGate instance over HTTP. Three modes of operation:
+Agent 004 runs 48 attack scenarios across 12 categories against a live AgentGate instance over HTTP. Four modes of operation:
 
 - **Static:** Runs all 48 attacks in fixed order (regression testing)
 - **Adaptive:** A Claude-powered strategist picks attacks each round and adapts based on results (default)
-- **Recursive:** Adaptive mode plus novel attack generation — Claude reasons about defense gaps, writes new JavaScript attack code, and executes it in a permission-restricted sandbox
+- **Recursive:** Adaptive mode plus novel attack generation — Claude writes new JavaScript attack code and executes it in a permission-restricted sandbox
+- **Team:** Three specialist personas (Shadow, Whale, Chaos) with separate identities, bond budgets, and coordinated operations — tests whether per-identity defenses hold under multi-identity pressure
 
 This is the fourth agent built on [AgentGate](https://github.com/selfradiance/agentgate). It's the first one designed to attack rather than use the system.
 
@@ -61,10 +62,22 @@ Recursive mode (adaptive + novel attack generation in a sandbox):
 npx tsx src/cli.ts --recursive
 ```
 
-Recursive with custom rounds:
+Team mode (3 personas with coordinated operations):
 
 ```bash
-npx tsx src/cli.ts --recursive --rounds 5
+npx tsx src/cli.ts --team
+```
+
+Team mode with fresh identities (required for canonical verification runs):
+
+```bash
+npx tsx src/cli.ts --team --fresh-team
+```
+
+Team mode with custom rounds:
+
+```bash
+npx tsx src/cli.ts --team --rounds 5
 ```
 
 Target a specific AgentGate instance:
@@ -73,7 +86,12 @@ Target a specific AgentGate instance:
 npx tsx src/cli.ts --target https://agentgate.run
 ```
 
-If both `--static` and `--rounds` are passed, `--static` takes precedence and `--rounds` is ignored. `--static` and `--recursive` are mutually exclusive.
+**Flag rules:**
+- `--static` and `--team` are mutually exclusive (exits with error)
+- `--static` and `--recursive` are mutually exclusive
+- `--fresh-team` requires `--team`
+- `--team` implies recursive mode (novel attack generation is included)
+- If `--static` and `--rounds` are both passed, `--static` takes precedence and `--rounds` is ignored
 
 ## Stage 2: Adaptive Mode
 
@@ -101,6 +119,24 @@ The sandbox has four layers of defense:
 - **IPC-only toolkit** — generated code can only call toolkit methods that send IPC messages to the parent; the parent makes all real HTTP calls
 - **String-level validator** — blocklist catches hallucinated dangerous patterns before execution
 
+## Stage 4: Team Mode
+
+Team mode adds three specialist personas with separate AgentGate identities and coordinated operations. The thesis: can an accountability system that is robust against one attacker still hold up when adversarial pressure is distributed across multiple identities with coordinated roles?
+
+### The Personas
+
+| Persona | Specialty | Bond Budget | Attack Families |
+|---------|-----------|-------------|-----------------|
+| Shadow | Recon & Timing | 50¢ | Replay, Signature, Timing, Recon |
+| Whale | Economic & Bond | 200¢ | Bond, Rate Limit/Sybil, Market, Economic |
+| Chaos | Input Fuzzing & Protocol | 100¢ | Authorization, Input Validation, Protocol, MCP |
+
+### Coordination Types
+
+**Handoff:** Persona A runs an attack and produces a finding. That intel is passed to Persona B, whose attack is parameterized by the intel. Tests whether intel from one identity helps another identity exploit a defense.
+
+**Distributed Probe:** Two personas attack the same defense simultaneously from their own identities (500ms stagger). Tests whether AgentGate's per-identity defenses remain correctly isolated under concurrent cross-identity load.
+
 ## Attack Categories
 
 | Category | Scenarios | What It Tests |
@@ -124,7 +160,7 @@ The sandbox has four layers of defense:
 npm test
 ```
 
-100 tests across 25 test files. Integration tests require a running AgentGate instance and valid API keys.
+130 tests across 26 test files. Integration tests require a running AgentGate instance and valid API keys.
 
 ## Tech Stack
 

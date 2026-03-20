@@ -3,9 +3,11 @@
 import "dotenv/config";
 import { describe, it, expect, beforeAll } from "vitest";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
-import { runAllAttacksStatic, runSelectedAttacks } from "../src/runner";
+import { runAllAttacksStatic, runSelectedAttacks, runPersonaAssignments, runCoordinatedOps, personaToClient } from "../src/runner";
 import { signRequest } from "../src/agentgate-client";
+import { initializeTeam, type PersonaIdentity } from "../src/personas";
 import type { AttackClient } from "../src/attacks/replay";
+import type { CoordinatedOp } from "../src/strategist";
 
 function base64UrlToBase64(value: string): string {
   return Buffer.from(value, "base64url").toString("base64");
@@ -121,6 +123,92 @@ describe.skipIf(!process.env.AGENTGATE_REST_KEY || process.env.AGENTGATE_REST_KE
       expect(results[0].scenarioId).toBe("99.99");
       expect(results[0].caught).toBe(false);
       expect(results[0].actualOutcome).toContain("not found in registry");
+    });
+  },
+);
+
+describe.skipIf(!process.env.AGENTGATE_REST_KEY || process.env.AGENTGATE_REST_KEY.includes("your-"))(
+  "runner — team mode against live AgentGate",
+  () => {
+    let team: PersonaIdentity[];
+    let agentGateUrl: string;
+    let apiKey: string;
+
+    beforeAll(async () => {
+      agentGateUrl = process.env.AGENTGATE_URL ?? "http://127.0.0.1:3000";
+      apiKey = process.env.AGENTGATE_REST_KEY!;
+      team = await initializeTeam(agentGateUrl, apiKey, true);
+    }, 30000);
+
+    it("personaToClient builds a valid client from persona identity", () => {
+      const client = personaToClient(team[0], agentGateUrl, apiKey);
+      expect(client.agentGateUrl).toBe(agentGateUrl);
+      expect(client.apiKey).toBe(apiKey);
+      expect(client.keys.publicKey).toBe(team[0].keys.publicKey);
+      expect(client.identityId).toBe(team[0].identityId);
+    });
+
+    it("runPersonaAssignments routes attacks to correct persona identities", { timeout: 30000 }, async () => {
+      const assignments = [
+        { persona: "shadow", attacks: [{ id: "1.1", reasoning: "Shadow recon" }] },
+        { persona: "whale", attacks: [{ id: "2.4", reasoning: "Whale economic" }] },
+      ];
+
+      const results = await runPersonaAssignments(assignments, team, agentGateUrl, apiKey, 1);
+
+      expect(results).toHaveLength(2);
+      expect(results[0].persona).toBe("shadow");
+      expect(results[0].results).toHaveLength(1);
+      expect(results[0].results[0].scenarioId).toBe("1.1");
+      expect(results[1].persona).toBe("whale");
+      expect(results[1].results).toHaveLength(1);
+      expect(results[1].results[0].scenarioId).toBe("2.4");
+    });
+
+    it("runPersonaAssignments skips unknown persona", { timeout: 10000 }, async () => {
+      const assignments = [
+        { persona: "nonexistent", attacks: [{ id: "1.1", reasoning: "test" }] },
+      ];
+
+      const results = await runPersonaAssignments(assignments, team, agentGateUrl, apiKey, 1);
+      expect(results).toHaveLength(0);
+    });
+
+    it("runCoordinatedOps executes a handoff operation", { timeout: 30000 }, async () => {
+      const ops: CoordinatedOp[] = [{
+        type: "handoff",
+        personas: ["shadow", "whale"],
+        attackRefs: ["1.1", "2.4"],
+        targetDefense: "Cross-identity coordination test",
+        expectedSignal: "Both attacks execute with different identities",
+        whyMultiIdentity: "Tests handoff mechanism",
+        intelFrom: "shadow",
+        intelSummary: "Nonce dedup is active",
+      }];
+
+      const results = await runCoordinatedOps(ops, team, agentGateUrl, apiKey, 1);
+
+      expect(results).toHaveLength(1);
+      expect(results[0].op.type).toBe("handoff");
+      expect(results[0].results.length).toBeGreaterThanOrEqual(2);
+      expect(results[0].intel).toBeTruthy();
+    });
+
+    it("runCoordinatedOps executes a distributed probe", { timeout: 30000 }, async () => {
+      const ops: CoordinatedOp[] = [{
+        type: "distributed_probe",
+        personas: ["whale", "chaos"],
+        attackRefs: ["2.4", "5.2"],
+        targetDefense: "Per-identity isolation under concurrent load",
+        expectedSignal: "Both defenses hold independently",
+        whyMultiIdentity: "Tests concurrent cross-identity pressure",
+      }];
+
+      const results = await runCoordinatedOps(ops, team, agentGateUrl, apiKey, 1);
+
+      expect(results).toHaveLength(1);
+      expect(results[0].op.type).toBe("distributed_probe");
+      expect(results[0].results).toHaveLength(2);
     });
   },
 );

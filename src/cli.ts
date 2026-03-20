@@ -1,4 +1,4 @@
-// Entry point — orchestrates full red team run (static, adaptive, or recursive mode)
+// Entry point — orchestrates full red team run (static, adaptive, recursive, or team mode)
 
 import "dotenv/config";
 import { loadOrCreateKeypair, createIdentity } from "./agentgate-client";
@@ -9,6 +9,7 @@ import type { StrategyResponse } from "./strategist";
 import type { AttackResult } from "./log";
 import { getAllScenarios } from "./registry";
 import { runRecursiveRound } from "./recursive-runner";
+import { initializeTeam, ALL_PERSONAS, type PersonaIdentity } from "./personas";
 
 async function main() {
   // Parse CLI args
@@ -25,10 +26,23 @@ async function main() {
 
   const isStatic = process.argv.includes("--static");
   const isRecursive = process.argv.includes("--recursive");
+  const isTeam = process.argv.includes("--team");
+  const isFreshTeam = process.argv.includes("--fresh-team");
 
-  // --static and --recursive are mutually exclusive
-  if (isStatic && isRecursive) {
-    console.error("Error: --static and --recursive are mutually exclusive. Use one or the other.");
+  // --team implies --recursive
+  const isRecursiveEffective = isRecursive || isTeam;
+
+  // Mutual exclusivity checks
+  if (isStatic && isRecursiveEffective) {
+    console.error("Error: --static and --recursive/--team are mutually exclusive. Use one or the other.");
+    process.exit(1);
+  }
+  if (isStatic && isTeam) {
+    console.error("Error: --static and --team are mutually exclusive.");
+    process.exit(1);
+  }
+  if (isFreshTeam && !isTeam) {
+    console.error("Error: --fresh-team requires --team.");
     process.exit(1);
   }
 
@@ -46,9 +60,11 @@ async function main() {
   const scenarioCount = getAllScenarios().length;
   const modeText = isStatic
     ? `Static (${scenarioCount} scenarios)`
-    : isRecursive
-      ? `Recursive (${rounds} rounds)`
-      : `Adaptive (${rounds} rounds)`;
+    : isTeam
+      ? `Team (${rounds} rounds, 3 personas)`
+      : isRecursive
+        ? `Recursive (${rounds} rounds)`
+        : `Adaptive (${rounds} rounds)`;
 
   console.log("");
   console.log("╔═══════════════════════════════════════════╗");
@@ -58,7 +74,7 @@ async function main() {
   console.log("╚═══════════════════════════════════════════╝");
   console.log("");
 
-  // Create or load identity
+  // Create or load primary identity (used by all non-team modes)
   const keys = loadOrCreateKeypair();
   const identityId = await createIdentity(keys);
   console.log(`Identity ready: ${identityId.slice(0, 20)}...`);
@@ -70,6 +86,21 @@ async function main() {
     identityId,
   };
 
+  // Create team identities if --team mode
+  let team: PersonaIdentity[] | undefined;
+  if (isTeam) {
+    console.log("");
+    console.log("Initializing team personas...");
+    if (isFreshTeam) {
+      console.log("  --fresh-team: deleting existing persona identities");
+    }
+    team = await initializeTeam(agentGateUrl, process.env.AGENTGATE_REST_KEY, isFreshTeam);
+    for (const persona of team) {
+      console.log(`  ${persona.config.displayName} (${persona.config.specialty}): ${persona.identityId.slice(0, 20)}... [${persona.config.bondBudgetCents}¢ budget]`);
+    }
+    console.log("");
+  }
+
   let allResults: AttackResult[];
   let allStrategies: StrategyResponse[] | undefined;
 
@@ -78,7 +109,94 @@ async function main() {
     console.log(`Running ${scenarioCount} attack scenarios...\n`);
     allResults = await runAllAttacksStatic(client);
 
-  } else if (isRecursive) {
+  } else if (isTeam) {
+    // Team mode — multi-identity coordinated pressure (Stage 4)
+    // For now, runs recursive mode with the primary identity.
+    // Full team orchestration will be wired in when the strategist and runner
+    // are updated to handle per-persona assignments and coordinated ops.
+    allResults = [];
+    const allRecursiveData: RecursiveRoundData[] = [];
+    let totalNovel = 0;
+    let totalNovelExecuted = 0;
+    let totalNovelValidated = 0;
+
+    for (let round = 1; round <= rounds; round++) {
+      printRoundHeader(round, rounds, "Team: multi-identity coordinated pressure");
+
+      const roundResult = await runRecursiveRound(
+        round, rounds, allResults, client,
+        {
+          targetUrl: agentGateUrl,
+          agentIdentity: {
+            identityId,
+            publicKey: keys.publicKey,
+            privateKey: keys.privateKey,
+          },
+          restKey: process.env.AGENTGATE_REST_KEY,
+        },
+      );
+
+      allResults.push(...roundResult.libraryResults, ...roundResult.novelResults);
+      allRecursiveData.push({
+        roundNumber: round,
+        hypotheses: roundResult.hypotheses,
+        generationOutcomes: roundResult.generationOutcomes,
+        novelResults: roundResult.novelResults,
+      });
+      totalNovel += roundResult.hypotheses.length;
+      totalNovelValidated += roundResult.generationOutcomes.filter((g) => g.success).length;
+      totalNovelExecuted += roundResult.novelResults.length;
+
+      // Round summary
+      const libCaught = roundResult.libraryResults.filter((r) => r.caught).length;
+      const novelCaught = roundResult.novelResults.filter((r) => r.caught).length;
+      const allRoundResults = [...roundResult.libraryResults, ...roundResult.novelResults];
+      const totalCaught = allRoundResults.filter((r) => r.caught).length;
+      const totalUncaught = allRoundResults.filter((r) => !r.caught).length;
+
+      console.log("");
+      console.log("───────────────────────────────────────────");
+      console.log(`  Round ${round} complete:`);
+      console.log(`    Library: ${roundResult.libraryResults.length} attacks, ${libCaught} caught`);
+      console.log(`    Novel:   ${roundResult.novelResults.length} executed, ${novelCaught} caught`);
+      console.log(`    Total:   ${allRoundResults.length} attacks, ${totalCaught} caught, ${totalUncaught} uncaught`);
+      console.log("───────────────────────────────────────────");
+    }
+
+    // Generate report with recursive data
+    console.log("\nAll rounds complete. Generating report...\n");
+    const report = await generateReport(allResults, undefined, allRecursiveData);
+    console.log(report);
+
+    // Final team summary
+    const caught = allResults.filter((r) => r.caught).length;
+    const uncaught = allResults.filter((r) => !r.caught).length;
+    const libraryTotal = allResults.filter((r) => r.category !== "Novel Attack").length;
+
+    console.log("");
+    console.log("════════════════════════════════════════");
+    console.log("  TEAM SUMMARY");
+    console.log("════════════════════════════════════════");
+    if (team) {
+      for (const persona of team) {
+        console.log(`  ${persona.config.displayName.padEnd(8)} (${persona.config.specialty})`);
+      }
+      console.log("────────────────────────────────────────");
+    }
+    console.log(`  Library attacks:     ${libraryTotal}`);
+    console.log(`  Novel hypotheses:    ${totalNovel}`);
+    console.log(`  Novel validated:     ${totalNovelValidated}`);
+    console.log(`  Novel executed:      ${totalNovelExecuted}`);
+    console.log(`  Total attacks:       ${allResults.length}`);
+    console.log(`  Caught:              ${caught} ✓`);
+    console.log(`  Uncaught:            ${uncaught}`);
+    console.log("════════════════════════════════════════");
+    console.log("");
+
+    process.exit(uncaught > 0 ? 1 : 0);
+    return;
+
+  } else if (isRecursiveEffective) {
     // Recursive mode — library attacks + novel attack generation
     allResults = [];
     const allRecursiveData: RecursiveRoundData[] = [];
@@ -138,7 +256,6 @@ async function main() {
     const caught = allResults.filter((r) => r.caught).length;
     const uncaught = allResults.filter((r) => !r.caught).length;
     const libraryTotal = allResults.filter((r) => r.category !== "Novel Attack").length;
-    const novelTotal = allResults.filter((r) => r.category === "Novel Attack").length;
 
     console.log("");
     console.log("════════════════════════════════════════");
@@ -155,7 +272,7 @@ async function main() {
     console.log("");
 
     process.exit(uncaught > 0 ? 1 : 0);
-    return; // unreachable but makes control flow clear
+    return;
 
   } else {
     // Adaptive mode — strategist picks attacks each round

@@ -2,7 +2,7 @@
 
 import "dotenv/config";
 import { describe, it, expect } from "vitest";
-import { generateReport } from "../src/reporter";
+import { generateReport, type RecursiveRoundData } from "../src/reporter";
 import type { AttackResult } from "../src/log";
 import type { StrategyResponse } from "../src/strategist";
 
@@ -27,6 +27,16 @@ const fakeResults: AttackResult[] = [
   },
 ];
 
+const fakeNovelResult: AttackResult = {
+  scenarioId: "novel-1",
+  scenarioName: "Test bond at exact TTL boundary of 1 second",
+  category: "Novel Attack",
+  expectedOutcome: "Probing: TTL enforcement",
+  actualOutcome: "CAUGHT: TTL of 1s was rejected",
+  caught: true,
+  details: "Hypothesis: minimum TTL boundary might not be enforced. Result: TTL of 1s rejected.",
+};
+
 const fakeStrategies: StrategyResponse[] = [
   {
     round: 1,
@@ -35,6 +45,38 @@ const fakeStrategies: StrategyResponse[] = [
       { id: "1.1", reasoning: "Baseline replay test" },
       { id: "3.2", reasoning: "Probe signature validation" },
     ],
+  },
+];
+
+const fakeRecursiveData: RecursiveRoundData[] = [
+  {
+    roundNumber: 1,
+    hypotheses: [
+      {
+        id: "novel-1",
+        description: "Test bond at exact TTL boundary of 1 second",
+        targetDefense: "TTL enforcement",
+        rationale: "Nobody tested the minimum TTL boundary",
+        confidence: "medium",
+      },
+    ],
+    generationOutcomes: [
+      {
+        success: true,
+        attack: {
+          hypothesis: {
+            id: "novel-1",
+            description: "Test bond at exact TTL boundary of 1 second",
+            targetDefense: "TTL enforcement",
+            rationale: "Nobody tested the minimum TTL boundary",
+            confidence: "medium",
+          },
+          code: 'async function novelAttack(toolkit) { toolkit.log("testing"); return { caught: true, reason: "TTL rejected" }; }',
+          validationResult: { valid: true },
+        },
+      },
+    ],
+    novelResults: [fakeNovelResult],
   },
 ];
 
@@ -58,6 +100,18 @@ describe("reporter", () => {
       process.env.ANTHROPIC_API_KEY = saved;
     }
   });
+
+  it("throws if ANTHROPIC_API_KEY is missing with recursive data", async () => {
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      await expect(
+        generateReport([...fakeResults, fakeNovelResult], undefined, fakeRecursiveData),
+      ).rejects.toThrow("ANTHROPIC_API_KEY not set");
+    } finally {
+      process.env.ANTHROPIC_API_KEY = saved;
+    }
+  });
 });
 
 describe.skipIf(!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes("your-"))(
@@ -72,6 +126,17 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.
 
     it("generates a report with strategy reasoning", { timeout: 30000 }, async () => {
       const report = await generateReport(fakeResults, fakeStrategies);
+      expect(report).toBeTruthy();
+      expect(report.length).toBeGreaterThan(50);
+      expect(report).toContain("AgentGate");
+    });
+
+    it("generates a report with recursive data", { timeout: 30000 }, async () => {
+      const report = await generateReport(
+        [...fakeResults, fakeNovelResult],
+        undefined,
+        fakeRecursiveData,
+      );
       expect(report).toBeTruthy();
       expect(report.length).toBeGreaterThan(50);
       expect(report).toContain("AgentGate");

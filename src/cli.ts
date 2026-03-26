@@ -16,6 +16,7 @@ import { analyzeTeamResults } from "./reasoner";
 import { executeInSandbox } from "./sandbox/executor";
 import { getSwarmConfig, createSwarmIdentities, type SwarmAgentIdentity } from "./swarm";
 import { runSwarmCampaign, validateCampaignConfig, type SwarmCampaignConfig } from "./swarm-runner";
+import { generateSwarmReport } from "./swarm-reporter";
 
 async function main() {
   // Parse CLI args
@@ -139,6 +140,11 @@ async function main() {
     }
 
     const result = await runSwarmCampaign(campaignConfig);
+
+    // Generate swarm report
+    console.log("\nAll rounds complete. Generating swarm report...\n");
+    const report = await generateSwarmReport(result);
+    console.log(report);
 
     // Print campaign summary
     console.log("");

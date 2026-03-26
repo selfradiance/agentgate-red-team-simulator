@@ -1,5 +1,6 @@
 .env
 agent-identity*.json
+swarm-identity-*.json
 *_PROJECT_CONTEXT.md
 node_modules/
 dist/

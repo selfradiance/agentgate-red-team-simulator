@@ -14,6 +14,8 @@ import { runRecursiveRound } from "./recursive-runner";
 import { initializeTeam, ALL_PERSONAS, type PersonaIdentity } from "./personas";
 import { analyzeTeamResults } from "./reasoner";
 import { executeInSandbox } from "./sandbox/executor";
+import { getSwarmConfig, createSwarmIdentities, type SwarmAgentIdentity } from "./swarm";
+import { runSwarmCampaign, validateCampaignConfig, type SwarmCampaignConfig } from "./swarm-runner";
 
 async function main() {
   // Parse CLI args
@@ -32,13 +34,16 @@ async function main() {
   const isRecursive = process.argv.includes("--recursive");
   const isTeam = process.argv.includes("--team");
   const isFreshTeam = process.argv.includes("--fresh-team");
+  const isFreshSwarm = process.argv.includes("--fresh-swarm");
+  const isSwarm = process.argv.includes("--swarm") || isFreshSwarm;
+  const isSequential = process.argv.includes("--sequential");
 
-  // --team implies --recursive
+  // --team implies --recursive, --swarm implies --recursive
   const isRecursiveEffective = isRecursive || isTeam;
 
   // Mutual exclusivity checks
-  if (isStatic && isRecursiveEffective) {
-    console.error("Error: --static and --recursive/--team are mutually exclusive. Use one or the other.");
+  if (isStatic && (isRecursiveEffective || isSwarm)) {
+    console.error("Error: --static and --recursive/--team/--swarm are mutually exclusive.");
     process.exit(1);
   }
   if (isStatic && isTeam) {
@@ -47,6 +52,14 @@ async function main() {
   }
   if (isFreshTeam && !isTeam) {
     console.error("Error: --fresh-team requires --team.");
+    process.exit(1);
+  }
+  if (isSwarm && isTeam) {
+    console.error("Error: --swarm and --team are mutually exclusive.");
+    process.exit(1);
+  }
+  if (isSequential && !isSwarm) {
+    console.error("Error: --sequential requires --swarm.");
     process.exit(1);
   }
 
@@ -64,11 +77,13 @@ async function main() {
   const scenarioCount = getAllScenarios().length;
   const modeText = isStatic
     ? `Static (${scenarioCount} scenarios)`
-    : isTeam
-      ? `Team (${rounds} rounds, 3 personas)`
-      : isRecursive
-        ? `Recursive (${rounds} rounds)`
-        : `Adaptive (${rounds} rounds)`;
+    : isSwarm
+      ? `Swarm (${rounds} rounds, ${isSequential ? "sequential" : "interleaved"})`
+      : isTeam
+        ? `Team (${rounds} rounds, 3 personas)`
+        : isRecursive
+          ? `Recursive (${rounds} rounds)`
+          : `Adaptive (${rounds} rounds)`;
 
   console.log("");
   console.log("╔═══════════════════════════════════════════╗");
@@ -78,7 +93,84 @@ async function main() {
   console.log("╚═══════════════════════════════════════════╝");
   console.log("");
 
-  // Create or load primary identity (used by all non-team modes)
+  // ═══════════════════════════════════════════════════════════════════════
+  // SWARM MODE (Stage 5 — v0.5.0-alpha)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  if (isSwarm) {
+    console.log("Initializing swarm identities...");
+    if (isFreshSwarm) {
+      console.log("  --fresh-swarm: deleting existing swarm identity files");
+    }
+
+    const swarmIdentities = await createSwarmIdentities(
+      agentGateUrl,
+      process.env.AGENTGATE_REST_KEY,
+      isFreshSwarm,
+    );
+
+    // v0.5.0-alpha: only Alpha and Gamma teams (skip Beta)
+    const fullSwarmConfig = getSwarmConfig();
+    const alphaGammaTeams = fullSwarmConfig.teams.filter(
+      (t) => t.name === "alpha" || t.name === "gamma",
+    );
+    const alphaGammaConfig = {
+      ...fullSwarmConfig,
+      teams: alphaGammaTeams as any,
+    };
+
+    // Build identities map (only Alpha + Gamma agents)
+    const identitiesMap = new Map<string, SwarmAgentIdentity>();
+    for (const identity of swarmIdentities) {
+      if (identity.config.team === "alpha" || identity.config.team === "gamma") {
+        identitiesMap.set(identity.config.agentId, identity);
+      }
+    }
+
+    console.log(`  ${identitiesMap.size} identities loaded (Alpha + Gamma — Beta skipped for v0.5.0-alpha)`);
+    for (const [agentId, identity] of identitiesMap) {
+      console.log(`    ${agentId}: ${identity.identityId.slice(0, 20)}... [${identity.config.bondBudgetCents}¢]`);
+    }
+    console.log("");
+
+    const campaignConfig: SwarmCampaignConfig = {
+      swarmConfig: alphaGammaConfig,
+      identities: identitiesMap,
+      targetUrl: agentGateUrl,
+      totalRounds: rounds,
+      sequential: isSequential,
+    };
+
+    const errors = validateCampaignConfig(campaignConfig);
+    if (errors.length > 0) {
+      console.error("Campaign config validation failed:");
+      for (const err of errors) console.error(`  - ${err}`);
+      process.exit(1);
+    }
+
+    const result = await runSwarmCampaign(campaignConfig);
+
+    // Print campaign summary
+    console.log("");
+    console.log("════════════════════════════════════════");
+    console.log("  SWARM CAMPAIGN SUMMARY");
+    console.log("════════════════════════════════════════");
+    for (const [teamName, summary] of result.perTeamSummary) {
+      console.log(`  ${teamName.padEnd(8)} ${summary.attacks} attacks, ${summary.caught} caught, ${summary.uncaught} uncaught`);
+    }
+    console.log("────────────────────────────────────────");
+    console.log(`  Total attacks:   ${result.totalAttacks}`);
+    console.log(`  Caught:          ${result.totalCaught}`);
+    console.log(`  Uncaught:        ${result.totalUncaught}`);
+    console.log(`  Intel log:       ${result.intelLog.getAllEntries().length} entries`);
+    console.log("════════════════════════════════════════");
+    console.log("");
+
+    process.exit(result.totalUncaught > 0 ? 1 : 0);
+    return;
+  }
+
+  // Create or load primary identity (used by all non-swarm modes)
   const keys = loadOrCreateKeypair();
   const identityId = await createIdentity(keys);
   console.log(`Identity ready: ${identityId.slice(0, 20)}...`);

@@ -208,14 +208,18 @@ export function parseSwarmStrategyResponse(text: string, teamName: SwarmTeamName
   if (typeof obj.strategy !== "string") throw new Error("Failed to parse swarm strategist response: missing 'strategy'");
   if (!Array.isArray(obj.selectedAttacks)) throw new Error("Failed to parse swarm strategist response: missing 'selectedAttacks'");
 
+  // Valid agentIds for this team — reject cross-team references from Claude
+  const validAgentIds = new Set([`${teamName}-1`, `${teamName}-2`, `${teamName}-3`]);
+
   const selectedAttacks: SwarmAttackPick[] = [];
   for (const pick of obj.selectedAttacks) {
     if (typeof pick !== "object" || pick === null) continue;
     const p = pick as Record<string, unknown>;
     if (typeof p.id !== "string" || typeof p.reasoning !== "string") continue;
+    const rawAgentId = typeof p.agentId === "string" ? p.agentId : `${teamName}-1`;
     selectedAttacks.push({
       id: p.id,
-      agentId: typeof p.agentId === "string" ? p.agentId : `${teamName}-1`,
+      agentId: validAgentIds.has(rawAgentId) ? rawAgentId : `${teamName}-1`,
       params: typeof p.params === "object" && p.params !== null ? p.params as Record<string, unknown> : undefined,
       reasoning: p.reasoning,
     });

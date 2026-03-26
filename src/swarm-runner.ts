@@ -145,6 +145,24 @@ async function executeQueuedAttack(
     };
   }
 
+  // Guard: ensure the identity belongs to the team claiming it
+  if (identity.config.team !== attack.teamName) {
+    console.log(`  [${attack.teamName}/${attack.agentId}] [${attack.pick.id}] SKIPPED — cross-team identity mismatch`);
+    return {
+      scenarioId: attack.pick.id,
+      scenarioName: "UNKNOWN",
+      category: "UNKNOWN",
+      expectedOutcome: "N/A",
+      actualOutcome: `Agent ${attack.agentId} belongs to team ${identity.config.team}, not ${attack.teamName}`,
+      caught: false,
+      details: `Cross-team identity mismatch: ${attack.agentId} is ${identity.config.team}, attack queued for ${attack.teamName}.`,
+      teamName: attack.teamName,
+      agentId: attack.agentId,
+      roundNumber,
+      executionPosition: position,
+    };
+  }
+
   const entry = getScenario(attack.pick.id);
 
   if (!entry) {

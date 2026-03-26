@@ -213,14 +213,18 @@ export function parseBetaStrategyResponse(text: string, config: BetaStrategistCo
     throw new Error("Failed to parse Beta strategist response: missing 'selectedActions'");
   }
 
+  // Valid agentIds for Beta team — reject cross-team references from Claude
+  const validBetaIds = new Set(config.team.agents.map((a) => a.agentId));
+
   const selectedActions: BetaActionPick[] = [];
   for (const pick of obj.selectedActions) {
     if (typeof pick !== "object" || pick === null) continue;
     const p = pick as Record<string, unknown>;
     if (typeof p.actionName !== "string" || typeof p.reasoning !== "string") continue;
+    const rawAgentId = typeof p.agentId === "string" ? p.agentId : config.team.agents[0].agentId;
     selectedActions.push({
       actionName: p.actionName,
-      agentId: typeof p.agentId === "string" ? p.agentId : config.team.agents[0].agentId,
+      agentId: validBetaIds.has(rawAgentId) ? rawAgentId : config.team.agents[0].agentId,
       reasoning: p.reasoning,
       params: typeof p.params === "object" && p.params !== null ? p.params as Record<string, unknown> : undefined,
     });

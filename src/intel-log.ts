@@ -109,7 +109,9 @@ export class IntelLog {
 
       for (const entry of roundEntries) {
         const hint = entry.targetHint ? ` [target: ${entry.targetHint}]` : "";
-        lines.push(`[${entry.team}] (${entry.type}) ${entry.subject}${hint}: ${entry.content}`);
+        // Truncate content to 500 chars to prevent token bloat in strategist prompts
+        const content = entry.content.length > 500 ? entry.content.slice(0, 500) + "..." : entry.content;
+        lines.push(`[${entry.team}] (${entry.type}) ${entry.subject}${hint}: ${content}`);
       }
 
       lines.push("");

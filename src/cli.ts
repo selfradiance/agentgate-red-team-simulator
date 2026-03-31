@@ -167,6 +167,16 @@ async function main() {
         },
       },
       {
+        // Design choice: this variant reuses the scout identity but omits
+        // the recon file. The target server sees the same identity that ran
+        // scout probes, so server-side state (reputation, rate-limit
+        // counters) carries over. This is intentional — the variant
+        // isolates the value of the recon *file* while holding identity
+        // constant. It is NOT a true blind baseline; variant 4
+        // (fresh + blind) serves that role. The temporal reporter's
+        // Finding A delta (same+recon vs same+blind) therefore measures
+        // "what recon intelligence adds" given identical server-side
+        // identity history, not recon advantage from a cold start.
         label: "2. Same identity + blind",
         options: {
           targetUrl: agentGateUrl,

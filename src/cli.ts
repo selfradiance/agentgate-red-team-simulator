@@ -93,33 +93,13 @@ async function main() {
     console.error("Error: AGENTGATE_REST_KEY not set in environment. Add it to .env or export it.");
     process.exit(1);
   }
-  if (!process.env.ANTHROPIC_API_KEY && !isStatic) {
+  if (!process.env.ANTHROPIC_API_KEY && !isStatic && !isScout && !isReportTemporal) {
     console.error("Error: ANTHROPIC_API_KEY not set in environment. Add it to .env or export it.");
     process.exit(1);
   }
   if (!process.env.ANTHROPIC_API_KEY && isStatic) {
     console.log("Warning: ANTHROPIC_API_KEY not set. Report generation will be skipped.");
   }
-
-  // Startup banner
-  const scenarioCount = getAllScenarios().length;
-  const modeText = isStatic
-    ? `Static (${scenarioCount} scenarios)`
-    : isSwarm
-      ? `Swarm (${rounds} rounds, ${isSequential ? "sequential" : "interleaved"})`
-      : isTeam
-        ? `Team (${rounds} rounds, 3 personas)`
-        : isRecursive
-          ? `Recursive (${rounds} rounds)`
-          : `Adaptive (${rounds} rounds)`;
-
-  console.log("");
-  console.log("╔═══════════════════════════════════════════╗");
-  console.log("║  Agent 004: Red Team Simulator            ║");
-  console.log(`║  Mode: ${modeText.padEnd(35)}║`);
-  console.log(`║  Target: ${agentGateUrl.padEnd(33)}║`);
-  console.log("╚═══════════════════════════════════════════╝");
-  console.log("");
 
   // ═══════════════════════════════════════════════════════════════════════
   // SLEEPER AGENT MODES (Stage 6 — v0.6.0)
@@ -196,6 +176,26 @@ async function main() {
     process.exit(0);
     return;
   }
+
+  // Startup banner (for non-sleeper modes)
+  const scenarioCount = getAllScenarios().length;
+  const modeText = isStatic
+    ? `Static (${scenarioCount} scenarios)`
+    : isSwarm
+      ? `Swarm (${rounds} rounds, ${isSequential ? "sequential" : "interleaved"})`
+      : isTeam
+        ? `Team (${rounds} rounds, 3 personas)`
+        : isRecursive
+          ? `Recursive (${rounds} rounds)`
+          : `Adaptive (${rounds} rounds)`;
+
+  console.log("");
+  console.log("╔═══════════════════════════════════════════╗");
+  console.log("║  Agent 004: Red Team Simulator            ║");
+  console.log(`║  Mode: ${modeText.padEnd(35)}║`);
+  console.log(`║  Target: ${agentGateUrl.padEnd(33)}║`);
+  console.log("╚═══════════════════════════════════════════╝");
+  console.log("");
 
   // ═══════════════════════════════════════════════════════════════════════
   // SWARM MODE (Stage 5 — v0.5.0-alpha)

@@ -17,6 +17,9 @@ import { executeInSandbox } from "./sandbox/executor";
 import { getSwarmConfig, createSwarmIdentities, type SwarmAgentIdentity } from "./swarm";
 import { runSwarmCampaign, validateCampaignConfig, type SwarmCampaignConfig } from "./swarm-runner";
 import { generateSwarmReport } from "./swarm-reporter";
+import { runScout } from "./sleeper/scout-runner";
+import { runStrike } from "./sleeper/strike-runner";
+import { generateTemporalReport } from "./sleeper/temporal-reporter";
 
 async function main() {
   // Parse CLI args
@@ -42,6 +45,20 @@ async function main() {
   const isFreshSwarm = process.argv.includes("--fresh-swarm");
   const isSwarm = process.argv.includes("--swarm") || isFreshSwarm;
   const isSequential = process.argv.includes("--sequential");
+
+  // Sleeper agent (v0.6.0) flags
+  const isScout = process.argv.includes("--scout");
+  const isStrike = process.argv.includes("--strike");
+  const isCampaign = process.argv.includes("--campaign");
+  const isReportTemporal = process.argv.includes("--report-temporal");
+  const isBlind = process.argv.includes("--blind");
+  const skipNonceTtl = process.argv.includes("--skip-nonce-ttl");
+
+  const reconFileIndex = process.argv.indexOf("--recon-file");
+  const reconFilePath = reconFileIndex !== -1 ? process.argv[reconFileIndex + 1] : undefined;
+
+  const identityModeIndex = process.argv.indexOf("--identity-mode");
+  const identityMode = identityModeIndex !== -1 ? process.argv[identityModeIndex + 1] as "same" | "fresh" : "fresh";
 
   // --team implies --recursive, --swarm implies --recursive
   const isRecursiveEffective = isRecursive || isTeam;
@@ -103,6 +120,82 @@ async function main() {
   console.log(`║  Target: ${agentGateUrl.padEnd(33)}║`);
   console.log("╚═══════════════════════════════════════════╝");
   console.log("");
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SLEEPER AGENT MODES (Stage 6 — v0.6.0)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  if (isReportTemporal) {
+    const report = await generateTemporalReport();
+    console.log(report);
+    process.exit(0);
+    return;
+  }
+
+  if (isScout || isCampaign) {
+    const scoutResult = await runScout({
+      targetUrl: agentGateUrl,
+      apiKey: process.env.AGENTGATE_REST_KEY!,
+      skipNonceTtl,
+      outputPath: "recon.json",
+    });
+
+    if (!isCampaign) {
+      process.exit(0);
+      return;
+    }
+
+    // Campaign mode: run all four strike variants after scout
+    console.log("\n  Campaign mode: running 4 strike variants...\n");
+
+    // 1. Same identity + recon
+    await runStrike({
+      targetUrl: agentGateUrl,
+      apiKey: process.env.AGENTGATE_REST_KEY!,
+      reconFile: "recon.json",
+      identityMode: "same",
+    });
+
+    // 2. Same identity + blind
+    await runStrike({
+      targetUrl: agentGateUrl,
+      apiKey: process.env.AGENTGATE_REST_KEY!,
+      identityMode: "same",
+    });
+
+    // 3. Fresh identity + recon
+    await runStrike({
+      targetUrl: agentGateUrl,
+      apiKey: process.env.AGENTGATE_REST_KEY!,
+      reconFile: "recon.json",
+      identityMode: "fresh",
+    });
+
+    // 4. Fresh identity + blind
+    await runStrike({
+      targetUrl: agentGateUrl,
+      apiKey: process.env.AGENTGATE_REST_KEY!,
+      identityMode: "fresh",
+    });
+
+    // Generate report
+    const report = await generateTemporalReport();
+    console.log(report);
+
+    process.exit(0);
+    return;
+  }
+
+  if (isStrike) {
+    await runStrike({
+      targetUrl: agentGateUrl,
+      apiKey: process.env.AGENTGATE_REST_KEY!,
+      reconFile: isBlind ? undefined : reconFilePath,
+      identityMode,
+    });
+    process.exit(0);
+    return;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // SWARM MODE (Stage 5 — v0.5.0-alpha)

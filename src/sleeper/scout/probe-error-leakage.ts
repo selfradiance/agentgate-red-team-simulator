@@ -3,7 +3,7 @@
 // No bonds, no actions, nothing enters resolution.
 
 import type { ReconFile } from "../recon-schema.js";
-import { signedPost, signedPostWithCustomHeaders, type ScoutKeys } from "./scout-client.js";
+import { postRawBody, signedPost, signedPostWithCustomHeaders, signedPostWithTimestamp, type ScoutKeys } from "./scout-client.js";
 
 export const hypothesis = "error_surface_exploitation";
 
@@ -70,17 +70,15 @@ export async function probe(
     leaks_internal_info: leaksInfo(String(r3.data.message ?? "")),
   });
 
-  // Test 4: Expired timestamp (10 minutes in the past)
-  const r4 = await signedPost(targetUrl, apiKey, scoutKeys, "/v1/bonds/lock", { identityId: scoutIdentityId, amountCents: 100 });
-  // This uses a valid signature but we need to test with a stale timestamp
-  // Use signedPostWithCustomHeaders with a manually crafted old timestamp
-  const oldTimestamp = (Date.now() - 600_000).toString();
-  const r4b = await signedPostWithCustomHeaders(targetUrl, "/v1/bonds/lock", { identityId: scoutIdentityId, amountCents: 100 }, {
-    "x-agentgate-key": apiKey,
-    "x-nonce": "test-nonce-3",
-    "x-agentgate-timestamp": oldTimestamp,
-    "x-agentgate-signature": "invalid-sig-for-old-ts",
-  });
+  // Test 4: Expired timestamp (10 minutes in the past) with a valid signature.
+  // Use an invalid payload so even an unexpectedly accepted timestamp does not create a bond.
+  const r4b = await signedPostWithTimestamp(targetUrl, apiKey, scoutKeys, "/v1/bonds/lock", {
+    identityId: scoutIdentityId,
+    amountCents: -100,
+    currency: "USD",
+    ttlSeconds: 300,
+    reason: "expired-ts-test",
+  }, Date.now() - 600_000);
   errors.push({
     input_type: "expired_timestamp",
     status_code: r4b.status,
@@ -117,7 +115,8 @@ export async function probe(
   });
 
   // Test 7: Invalid JSON (send raw string)
-  const r7 = await signedPostWithCustomHeaders(targetUrl, "/v1/bonds/lock", "not-valid-json" as any, {
+  const r7 = await postRawBody(targetUrl, "/v1/bonds/lock", "{not-valid-json", {
+    "content-type": "application/json",
     "x-agentgate-key": apiKey,
     "x-nonce": "test-nonce-4",
     "x-agentgate-timestamp": Date.now().toString(),

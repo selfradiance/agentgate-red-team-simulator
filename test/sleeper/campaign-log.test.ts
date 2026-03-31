@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {
   CampaignRunSchema,
   CampaignLogSchema,
+  InvalidCampaignLogError,
   appendRun,
   readCampaignLog,
   type CampaignRun,
@@ -98,6 +99,11 @@ describe("readCampaignLog", () => {
     const log = await readCampaignLog(logPath);
     expect(log).toEqual([]);
   });
+
+  it("throws InvalidCampaignLogError for malformed JSON", async () => {
+    await writeFile(logPath, "{broken", "utf-8");
+    await expect(readCampaignLog(logPath)).rejects.toBeInstanceOf(InvalidCampaignLogError);
+  });
 });
 
 describe("appendRun", () => {
@@ -131,5 +137,16 @@ describe("appendRun", () => {
     const log = await readCampaignLog(logPath);
     expect(log[0].recon_mode).toBe("recon");
     expect(log[1].recon_mode).toBe("blind");
+  });
+
+  it("keeps both runs when appending concurrently", async () => {
+    await Promise.all([
+      appendRun(logPath, makeRun({ run_id: "run-001" })),
+      appendRun(logPath, makeRun({ run_id: "run-002" })),
+    ]);
+
+    const log = await readCampaignLog(logPath);
+    expect(log).toHaveLength(2);
+    expect(log.map((run) => run.run_id).sort()).toEqual(["run-001", "run-002"]);
   });
 });

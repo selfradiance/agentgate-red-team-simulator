@@ -79,6 +79,10 @@ const toolkit = {
     return _toolkitCall("signedPost", [path, body]);
   },
 
+  async signedPostWithControl(path, body, control) {
+    return _toolkitCall("signedPostWithControl", [path, body, control]);
+  },
+
   async rawPost(path, body, headers) {
     return _toolkitCall("rawPost", [path, body, headers]);
   },
@@ -100,18 +104,7 @@ const toolkit = {
   },
 
   async sleep(ms) {
-    const capped = Math.min(ms, 5000);
-    return new Promise((resolve) => {
-      const end = Date.now() + capped;
-      function check() {
-        if (Date.now() >= end) {
-          resolve();
-        } else {
-          Promise.resolve().then(check);
-        }
-      }
-      check();
-    });
+    return _toolkitCall("sleep", [ms]);
   },
 
   async getReputation(identityId) {

@@ -27,6 +27,7 @@ export interface ToolkitHostOptions {
 const HTTP_TIMEOUT_MS = 5_000;
 const RESPONSE_BODY_CAP = 4096;
 const MAX_CREATE_IDENTITY = 3;
+const MAX_SLEEP_MS = 420_000;
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
@@ -70,9 +71,14 @@ function makeSignedHeaders(
   method: string,
   apiPath: string,
   body: unknown,
+  control?: { nonce?: string; timestampMs?: number },
 ): Record<string, string> {
-  const nonce = randomUUID();
-  const timestamp = Date.now().toString();
+  const nonce = typeof control?.nonce === "string" && control.nonce.length > 0
+    ? control.nonce
+    : randomUUID();
+  const timestamp = typeof control?.timestampMs === "number" && Number.isFinite(control.timestampMs)
+    ? Math.trunc(control.timestampMs).toString()
+    : Date.now().toString();
   const signature = signRequest(publicKey, privateKey, nonce, method, apiPath, timestamp, body);
   return {
     "content-type": "application/json",
@@ -125,6 +131,25 @@ const handlers: Record<string, MethodHandler> = {
     const headers = makeSignedHeaders(
       options.agentIdentity.publicKey, options.agentIdentity.privateKey,
       options.restKey, "POST", apiPath, body,
+    );
+    return fetchWithTimeout(buildAndValidateUrl(apiPath, options.targetUrl), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+  },
+
+  async signedPostWithControl(args, options) {
+    const [apiPath, body, control] = args as [string, unknown, { nonce?: string; timestampMs?: number } | undefined];
+    validatePath(apiPath);
+    const headers = makeSignedHeaders(
+      options.agentIdentity.publicKey,
+      options.agentIdentity.privateKey,
+      options.restKey,
+      "POST",
+      apiPath,
+      body,
+      control,
     );
     return fetchWithTimeout(buildAndValidateUrl(apiPath, options.targetUrl), {
       method: "POST",
@@ -274,6 +299,15 @@ const handlers: Record<string, MethodHandler> = {
       return Object.freeze({ foundRawHtml: false, details: "Dashboard unreachable" });
     }
   },
+
+  async sleep(args) {
+    const [requestedMs] = args as [number];
+    const durationMs = typeof requestedMs === "number" && Number.isFinite(requestedMs)
+      ? Math.max(0, Math.min(MAX_SLEEP_MS, Math.trunc(requestedMs)))
+      : 0;
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+    return Object.freeze({ sleptMs: durationMs });
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -325,6 +359,7 @@ export function attachStubToolkitHost(child: ChildProcess): void {
 
       switch (method) {
         case "signedPost":
+        case "signedPostWithControl":
         case "rawPost":
         case "signedPostAs": {
           const stubArgs = m.args as unknown[];
@@ -357,6 +392,9 @@ export function attachStubToolkitHost(child: ChildProcess): void {
           break;
         case "checkDashboardForRawHtml":
           result = { foundRawHtml: false };
+          break;
+        case "sleep":
+          result = { sleptMs: 0 };
           break;
         default:
           throw new Error(`Unknown toolkit method: ${method}`);

@@ -5,14 +5,17 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { ReconFileSchema, type ReconFile } from "./recon-schema.js";
-import { generateKeypair, createScoutIdentity, lockBond, executeAction, resolveAction, rawGet, signedPostWithNonce, type ScoutKeys, type ScoutIdentity } from "./scout/scout-client.js";
-import { planStrike, getDefaultStrategy, type StrikeStrategy, type StrikeAttack, type AttackOutcome } from "./strike-strategist.js";
+import { DEFAULT_SLEEPER_IDENTITY_PATH, loadSleeperIdentity } from "./identity-store.js";
+import { generateKeypair, createScoutIdentity, type ScoutKeys } from "./scout/scout-client.js";
+import { planStrike, getDefaultStrategy, type StrikeStrategy, type AttackOutcome } from "./strike-strategist.js";
+import { executePreparedStrikeAttack, makeSkippedAttackOutcome, prepareStrikeAttack } from "./strike-executor.js";
 import { appendRun, type CampaignRun } from "./campaign-log.js";
 
 export interface StrikeOptions {
   targetUrl: string;
   apiKey: string;
   reconFile?: string;     // path to recon.json (omit for blind)
+  identityFile?: string;
   identityMode: "same" | "fresh";
   scoutIdentityId?: string; // for "same" mode
   scoutKeys?: ScoutKeys;    // for "same" mode
@@ -40,119 +43,14 @@ async function loadRecon(path: string): Promise<ReconFile> {
   return ReconFileSchema.parse(parsed);
 }
 
-async function executeStrikeAttack(
-  attack: StrikeAttack,
-  targetUrl: string,
-  apiKey: string,
-  strikeKeys: ScoutKeys,
-  strikeIdentityId: string,
-  resolverKeys: ScoutKeys,
-  resolverIdentityId: string,
-): Promise<AttackOutcome> {
-  const startTime = Date.now();
-
-  try {
-    switch (attack.objective_id) {
-      case "T1": {
-        // Rate Limit Bypass — burst execute_bonded_action requests
-        const burstCount = (attack.params.burst_count as number) ?? 11;
-        const bondResult = await lockBond(targetUrl, apiKey, strikeKeys, strikeIdentityId, 100);
-        if (bondResult.status < 200 || bondResult.status >= 300) {
-          return { objective_id: "T1", success: false, response_status: bondResult.status, details: "Bond lock failed" };
-        }
-        const bondId = bondResult.data.bondId as string;
-        let successes = 0;
-        let lastStatus = 0;
-        for (let i = 0; i < burstCount; i++) {
-          const r = await executeAction(targetUrl, apiKey, strikeKeys, strikeIdentityId, bondId, 5);
-          lastStatus = r.status;
-          if (r.status >= 200 && r.status < 300) {
-            successes++;
-            const actionId = r.data.actionId as string;
-            await resolveAction(targetUrl, apiKey, resolverKeys, resolverIdentityId, actionId);
-          }
-          if (r.status === 429) break;
-        }
-        const bypassed = successes > 10;
-        return { objective_id: "T1", success: bypassed, response_status: lastStatus, details: `${successes}/${burstCount} succeeded. ${bypassed ? "Bypassed rate limit" : "Rate limit held"}` };
-      }
-
-      case "T2": {
-        // Bond Capacity Overflow
-        const bondCents = (attack.params.bond_cents as number) ?? 100;
-        const exposureCents = (attack.params.exposure_cents as number) ?? 85;
-        const bondResult = await lockBond(targetUrl, apiKey, strikeKeys, strikeIdentityId, bondCents);
-        if (bondResult.status < 200 || bondResult.status >= 300) {
-          return { objective_id: "T2", success: false, response_status: bondResult.status, details: "Bond lock failed" };
-        }
-        const bondId = bondResult.data.bondId as string;
-        const r = await executeAction(targetUrl, apiKey, strikeKeys, strikeIdentityId, bondId, exposureCents);
-        const overflow = r.status >= 200 && r.status < 300;
-        if (overflow) {
-          const actionId = r.data.actionId as string;
-          await resolveAction(targetUrl, apiKey, resolverKeys, resolverIdentityId, actionId);
-        }
-        return { objective_id: "T2", success: overflow, response_status: r.status, error_code: String(r.data.code ?? ""), details: `Bond ${bondCents}¢, exposure ${exposureCents}¢. ${overflow ? "Overflow succeeded" : "Blocked"}` };
-      }
-
-      case "T3": {
-        // Tier Cap Evasion — try to lock bond exceeding tier cap
-        const bondAmount = (attack.params.bond_cents as number) ?? 500;
-        const r = await lockBond(targetUrl, apiKey, strikeKeys, strikeIdentityId, bondAmount);
-        const evaded = r.status >= 200 && r.status < 300;
-        return { objective_id: "T3", success: evaded, response_status: r.status, details: `Attempted ${bondAmount}¢ bond. ${evaded ? "Tier cap evaded" : "Blocked by tier cap"}` };
-      }
-
-      case "T4": {
-        // Replay / Nonce Reuse
-        const nonce = `strike-replay-${Date.now()}`;
-        const body = { identityId: strikeIdentityId, amountCents: 100, currency: "USD", ttlSeconds: 300, reason: "strike" };
-        // First request
-        await signedPostWithNonce(targetUrl, apiKey, strikeKeys, "/v1/bonds/lock", body, nonce);
-        // Wait for TTL if specified
-        const waitMs = (attack.params.wait_seconds as number ?? 0) * 1000;
-        if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-        // Replay
-        const r = await signedPostWithNonce(targetUrl, apiKey, strikeKeys, "/v1/bonds/lock", body, nonce);
-        const replayed = r.status >= 200 && r.status < 300;
-        return { objective_id: "T4", success: replayed, response_status: r.status, details: `Nonce replay ${replayed ? "succeeded" : "rejected"}. Wait: ${(attack.params.wait_seconds as number) ?? 0}s` };
-      }
-
-      case "T5": {
-        // Error-Informed Targeted Attack — probe weakest validation
-        const endpoint = (attack.params.endpoint as string) ?? "/v1/bonds/lock";
-        const payload = (attack.params.payload as Record<string, unknown>) ?? { identityId: strikeIdentityId };
-        const r = await lockBond(targetUrl, apiKey, strikeKeys, strikeIdentityId, 100);
-        const found = r.status >= 200 && r.status < 300;
-        return { objective_id: "T5", success: found, response_status: r.status, details: `Targeted ${endpoint}. ${found ? "Found weakness" : "Validation held"}` };
-      }
-
-      case "T6": {
-        // Unauthenticated State Extraction
-        const endpoints = (attack.params.endpoints as string[]) ?? ["/health", "/v1/stats"];
-        let extracted = 0;
-        const findings: string[] = [];
-        for (const ep of endpoints) {
-          const r = await rawGet(targetUrl, ep);
-          if (r.status === 200) {
-            const keys = Object.keys(r.data);
-            extracted += keys.length;
-            findings.push(`${ep}: [${keys.join(",")}]`);
-          }
-        }
-        return { objective_id: "T6", success: extracted > 3, response_status: 200, details: `Extracted ${extracted} fields. ${findings.join("; ")}` };
-      }
-
-      default:
-        return { objective_id: attack.objective_id, success: false, details: `Unknown objective: ${attack.objective_id}` };
-    }
-  } catch (err) {
-    return { objective_id: attack.objective_id, success: false, details: `Error: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
 export async function runStrike(options: StrikeOptions): Promise<CampaignRun> {
-  const { targetUrl, apiKey, identityMode, rounds = 3 } = options;
+  const {
+    targetUrl,
+    apiKey,
+    identityMode,
+    rounds = 3,
+    identityFile = DEFAULT_SLEEPER_IDENTITY_PATH,
+  } = options;
   const isBlind = !options.reconFile;
 
   console.log("\n╔═══════════════════════════════════════════╗");
@@ -182,6 +80,16 @@ export async function runStrike(options: StrikeOptions): Promise<CampaignRun> {
     strikeKeys = options.scoutKeys;
     strikeIdentityId = options.scoutIdentityId;
     console.log(`  Reusing scout identity: ${strikeIdentityId.slice(0, 20)}...`);
+  } else if (identityMode === "same") {
+    const savedIdentity = await loadSleeperIdentity(identityFile);
+    if (savedIdentity.target_url !== targetUrl) {
+      throw new Error(
+        `Sleeper identity file target mismatch: expected ${targetUrl}, found ${savedIdentity.target_url}`,
+      );
+    }
+    strikeKeys = savedIdentity.keys;
+    strikeIdentityId = savedIdentity.identity_id;
+    console.log(`  Reusing sleeper identity from file: ${strikeIdentityId.slice(0, 20)}...`);
   } else {
     strikeKeys = generateKeypair();
     strikeIdentityId = await createScoutIdentity(targetUrl, apiKey, strikeKeys);
@@ -229,23 +137,33 @@ export async function runStrike(options: StrikeOptions): Promise<CampaignRun> {
       }
 
       console.log(`    [${attack.objective_id}] ${attack.reasoning.slice(0, 80)}`);
-      const outcome = await executeStrikeAttack(
-        attack, targetUrl, apiKey, strikeKeys, strikeIdentityId, resolverKeys, resolverIdentityId,
-      );
+      const prepared = prepareStrikeAttack(attack, BUDGET - totalExposure);
+      const outcome = !prepared.ready
+        ? makeSkippedAttackOutcome(attack, prepared.reason)
+        : await executePreparedStrikeAttack(prepared.attack, {
+            targetUrl,
+            apiKey,
+            strikeKeys,
+            strikeIdentityId,
+            resolverKeys,
+            resolverIdentityId,
+          });
       allOutcomes.push(outcome);
-      totalProbes++;
+      totalProbes += outcome.request_count ?? 0;
+      totalExposure += outcome.exposure_used ?? 0;
 
-      // Track exposure (rough estimate)
-      const exposureEstimate = (attack.params.exposure_cents as number) ?? (attack.params.bond_cents as number) ?? 50;
-      totalExposure += exposureEstimate;
-
-      if (outcome.success && timeToFirstBoundary === 0) {
+      if (
+        timeToFirstBoundary === 0 &&
+        (outcome.success || outcome.response_status === 400 || outcome.response_status === 429)
+      ) {
         timeToFirstBoundary = (Date.now() - startTime) / 1000;
       }
 
       allAttackLogs.push({
         objective_id: attack.objective_id,
-        params: attack.params,
+        params: prepared.ready
+          ? prepared.attack.params
+          : { ...attack.params, skip_reason: prepared.reason },
         reasoning: attack.reasoning,
         recon_dependency: attack.recon_dependency,
         success: outcome.success,
@@ -253,7 +171,7 @@ export async function runStrike(options: StrikeOptions): Promise<CampaignRun> {
         response_status: outcome.response_status,
       });
 
-      const status = outcome.success ? "SUCCESS" : "BLOCKED";
+      const status = outcome.success ? "SUCCESS" : outcome.request_count === 0 ? "SKIPPED" : "BLOCKED";
       console.log(`      → ${status}: ${outcome.details.slice(0, 100)}`);
     }
   }

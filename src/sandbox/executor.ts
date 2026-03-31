@@ -29,6 +29,7 @@ export interface ExecutorOptions {
   };
   restKey?: string;
   personaName?: string;
+  timeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ export interface ExecutorOptions {
 // ---------------------------------------------------------------------------
 
 const CHILD_RUNNER_SOURCE = path.resolve(__dirname, "child-runner.js");
-const TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -46,6 +47,7 @@ export async function executeInSandbox(code: string, options?: ExecutorOptions):
   const startTime = Date.now();
   const logs: string[] = [];
   let tempDir: string | undefined;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   try {
     // Step 1: Create temp directory and resolve symlinks (macOS: /var → /private/var)
@@ -98,17 +100,17 @@ export async function executeInSandbox(code: string, options?: ExecutorOptions):
         attachStubToolkitHost(child);
       }
 
-      // Step 4: Set up 15-second hard timeout
+      // Step 4: Set up hard timeout
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
         settle({
           success: false,
           timedOut: true,
-          error: `Sandbox execution timed out after ${TIMEOUT_MS / 1000}s`,
+          error: `Sandbox execution timed out after ${timeoutMs / 1000}s`,
           logs,
           durationMs: Date.now() - startTime,
         });
-      }, TIMEOUT_MS);
+      }, timeoutMs);
 
       // Step 5: Collect logs and results via IPC
       child.on("message", (msg: unknown) => {

@@ -2,6 +2,7 @@
 
 import { writeFile } from "node:fs/promises";
 import { ReconFileSchema, RECON_VERSION, type ReconFile } from "./recon-schema.js";
+import { DEFAULT_SLEEPER_IDENTITY_PATH, saveSleeperIdentity } from "./identity-store.js";
 import { generateKeypair, createScoutIdentity, type ScoutIdentity, type ScoutKeys } from "./scout/scout-client.js";
 import { appendRun, type CampaignRun } from "./campaign-log.js";
 import { probe as probeEndpointShape } from "./scout/probe-endpoint-shape.js";
@@ -17,6 +18,7 @@ export interface ScoutOptions {
   apiKey: string;
   skipNonceTtl?: boolean;
   outputPath?: string;
+  identityFilePath?: string;
   campaignLogPath?: string;
 }
 
@@ -27,7 +29,13 @@ export interface ScoutResult {
 }
 
 export async function runScout(options: ScoutOptions): Promise<ScoutResult> {
-  const { targetUrl, apiKey, skipNonceTtl = false, outputPath = "recon.json" } = options;
+  const {
+    targetUrl,
+    apiKey,
+    skipNonceTtl = false,
+    outputPath = "recon.json",
+    identityFilePath = DEFAULT_SLEEPER_IDENTITY_PATH,
+  } = options;
 
   console.log("\n╔═══════════════════════════════════════════╗");
   console.log("║  Sleeper Agent — Scout Phase              ║");
@@ -112,7 +120,15 @@ export async function runScout(options: ScoutOptions): Promise<ScoutResult> {
   // Step 9: S5 — Nonce/Replay (needs Resolver, has 6-min wait — run last)
   console.log("\n  ── S5: Nonce and Replay Behavior ──");
   try {
-    recon.nonce_behavior = await probeNonceReplay(targetUrl, apiKey, scoutKeys, scoutIdentityId, skipNonceTtl);
+    recon.nonce_behavior = await probeNonceReplay(
+      targetUrl,
+      apiKey,
+      scoutKeys,
+      scoutIdentityId,
+      resolverKeys,
+      resolverIdentityId,
+      skipNonceTtl,
+    );
     console.log(`    Duplicate error: ${recon.nonce_behavior?.duplicate_error_code}, Reuse after TTL: ${recon.nonce_behavior?.nonce_reuse_after_ttl}`);
   } catch (err) {
     console.log(`    S5 failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -128,6 +144,9 @@ export async function runScout(options: ScoutOptions): Promise<ScoutResult> {
   const reconFile = validated.data;
   await writeFile(outputPath, JSON.stringify(reconFile, null, 2), "utf-8");
   console.log(`\n  Recon file written to: ${outputPath}`);
+
+  await saveSleeperIdentity(scoutIdentityId, targetUrl, scoutKeys, identityFilePath);
+  console.log(`  Sleeper identity written to: ${identityFilePath}`);
 
   // Step 12: Print summary
   const sections = [

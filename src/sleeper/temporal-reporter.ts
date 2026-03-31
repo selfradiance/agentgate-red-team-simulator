@@ -2,14 +2,16 @@
 // Outputs the 4-column table and Governance Interpretation section.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { readCampaignLog, type CampaignLog, type CampaignRun } from "./campaign-log.js";
+import { InvalidCampaignLogError, readCampaignLog, type CampaignLog, type CampaignRun } from "./campaign-log.js";
 
 export interface ReportOptions {
   campaignLogPath?: string;
 }
 
 function findRun(log: CampaignLog, identityMode: string, reconMode: string): CampaignRun | undefined {
-  return log.find((r) => r.mode === "strike" && r.identity_mode === identityMode && r.recon_mode === reconMode);
+  return [...log]
+    .reverse()
+    .find((r) => r.mode === "strike" && r.identity_mode === identityMode && r.recon_mode === reconMode);
 }
 
 function formatMetric(value: number | undefined, type: "percent" | "cents" | "count" | "seconds"): string {
@@ -98,7 +100,15 @@ function computeDeltas(log: CampaignLog): string {
 
 export async function generateTemporalReport(options: ReportOptions = {}): Promise<string> {
   const logPath = options.campaignLogPath ?? "temporal-campaign-log.json";
-  const log = await readCampaignLog(logPath);
+  let log: CampaignLog;
+  try {
+    log = await readCampaignLog(logPath);
+  } catch (err) {
+    if (err instanceof InvalidCampaignLogError) {
+      return `Campaign log unreadable: ${err.message}`;
+    }
+    throw err;
+  }
 
   if (log.length === 0) {
     return "No campaign data found. Run scout and strike phases first.";

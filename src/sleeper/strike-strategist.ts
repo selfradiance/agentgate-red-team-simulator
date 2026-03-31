@@ -40,6 +40,8 @@ export interface AttackOutcome {
   error_code?: string;
   response_status?: number;
   details: string;
+  exposure_used?: number;
+  request_count?: number;
 }
 
 const OBJECTIVES = `

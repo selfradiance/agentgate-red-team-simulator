@@ -20,6 +20,7 @@ import { generateSwarmReport } from "./swarm-reporter";
 import { runScout } from "./sleeper/scout-runner";
 import { runStrike } from "./sleeper/strike-runner";
 import { generateTemporalReport } from "./sleeper/temporal-reporter";
+import { DEFAULT_SLEEPER_IDENTITY_PATH, sleeperIdentityExists } from "./sleeper/identity-store";
 
 async function main() {
   // Parse CLI args
@@ -57,6 +58,9 @@ async function main() {
   const reconFileIndex = process.argv.indexOf("--recon-file");
   const reconFilePath = reconFileIndex !== -1 ? process.argv[reconFileIndex + 1] : undefined;
 
+  const identityFileIndex = process.argv.indexOf("--identity-file");
+  const identityFilePath = identityFileIndex !== -1 ? process.argv[identityFileIndex + 1] : DEFAULT_SLEEPER_IDENTITY_PATH;
+
   const identityModeIndex = process.argv.indexOf("--identity-mode");
   const identityModeRaw = identityModeIndex !== -1 ? process.argv[identityModeIndex + 1] : "fresh";
   if (identityModeRaw !== "same" && identityModeRaw !== "fresh") {
@@ -73,6 +77,10 @@ async function main() {
   }
   if (sleeperFlags > 0 && (isStatic || isRecursive || isTeam || isSwarm)) {
     console.error("Error: sleeper flags (--scout, --strike, --campaign, --report-temporal) cannot be combined with --static, --recursive, --team, or --swarm.");
+    process.exit(1);
+  }
+  if (isBlind && reconFilePath) {
+    console.error("Error: --blind cannot be combined with --recon-file.");
     process.exit(1);
   }
 
@@ -134,6 +142,7 @@ async function main() {
       apiKey: process.env.AGENTGATE_REST_KEY!,
       skipNonceTtl,
       outputPath: "recon.json",
+      identityFilePath,
     });
 
     if (!isCampaign) {
@@ -150,6 +159,7 @@ async function main() {
       apiKey: process.env.AGENTGATE_REST_KEY!,
       reconFile: "recon.json",
       identityMode: "same",
+      identityFile: identityFilePath,
       scoutKeys: scoutResult.scoutKeys,
       scoutIdentityId: scoutResult.scoutIdentityId,
     });
@@ -159,6 +169,7 @@ async function main() {
       targetUrl: agentGateUrl,
       apiKey: process.env.AGENTGATE_REST_KEY!,
       identityMode: "same",
+      identityFile: identityFilePath,
       scoutKeys: scoutResult.scoutKeys,
       scoutIdentityId: scoutResult.scoutIdentityId,
     });
@@ -187,10 +198,16 @@ async function main() {
   }
 
   if (isStrike) {
+    if (identityMode === "same" && !sleeperIdentityExists(identityFilePath)) {
+      console.error(`Error: --identity-mode same requires a sleeper identity file. Run --scout first or provide --identity-file (looked for ${identityFilePath}).`);
+      process.exit(1);
+    }
+
     await runStrike({
       targetUrl: agentGateUrl,
       apiKey: process.env.AGENTGATE_REST_KEY!,
       reconFile: isBlind ? undefined : reconFilePath,
+      identityFile: identityFilePath,
       identityMode,
     });
     process.exit(0);

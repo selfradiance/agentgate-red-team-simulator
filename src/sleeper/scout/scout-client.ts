@@ -129,6 +129,35 @@ export async function signedPostWithCustomHeaders(
   }
 }
 
+export async function postRawBody(
+  targetUrl: string,
+  apiPath: string,
+  rawBody: string,
+  headers: Record<string, string>,
+): Promise<RawResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(new URL(apiPath, targetUrl), {
+      method: "POST",
+      headers,
+      body: rawBody,
+      signal: controller.signal,
+    });
+
+    let data: Record<string, unknown>;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch {
+      data = { error: "UNPARSEABLE_RESPONSE", message: await response.text().catch(() => "(empty)") };
+    }
+    return { status: response.status, data };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function signedPostWithTimestamp(
   targetUrl: string,
   apiKey: string,
@@ -261,13 +290,15 @@ export async function lockBond(
   keys: ScoutKeys,
   identityId: string,
   amountCents: number,
+  ttlSeconds: number = 300,
+  reason: string = "scout-probe",
 ): Promise<RawResponse> {
   return signedPost(targetUrl, apiKey, keys, "/v1/bonds/lock", {
     identityId,
     amountCents,
     currency: "USD",
-    ttlSeconds: 300,
-    reason: "scout-probe",
+    ttlSeconds,
+    reason,
   });
 }
 

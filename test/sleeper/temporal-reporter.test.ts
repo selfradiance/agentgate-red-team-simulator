@@ -72,4 +72,23 @@ describe("Temporal Reporter", () => {
     expect(report).toBeTruthy();
     expect(report.length).toBeGreaterThan(50);
   });
+
+  it("returns a readable message for corrupted logs", async () => {
+    await writeFile(logPath, "{broken", "utf-8");
+    const report = await generateTemporalReport({ campaignLogPath: logPath });
+    expect(report).toContain("Campaign log unreadable");
+  });
+
+  it("uses the latest matching strike run in the matrix", async () => {
+    const log = [
+      makeRun({ run_id: "same-recon-old", identity_mode: "same", recon_mode: "recon", metrics: { ...makeRun().metrics, cost_effective_exposure: 111 } }),
+      makeRun({ run_id: "same-blind", identity_mode: "same", recon_mode: "blind", metrics: { ...makeRun().metrics, cost_effective_exposure: 222 } }),
+      makeRun({ run_id: "same-recon-new", identity_mode: "same", recon_mode: "recon", metrics: { ...makeRun().metrics, cost_effective_exposure: 987 } }),
+    ];
+    await writeFile(logPath, JSON.stringify(log), "utf-8");
+
+    const report = await generateTemporalReport({ campaignLogPath: logPath });
+    expect(report).toContain("987¢");
+    expect(report).not.toContain("111¢");
+  });
 });

@@ -233,7 +233,8 @@ export function prepareStrikeAttack(
   }
 }
 
-function buildStrikeCode(
+/** @internal Exported for testing only. */
+export function buildStrikeCode(
   attack: PreparedStrikeAttack,
   ctx: StrikeExecutionContext,
 ): string {
